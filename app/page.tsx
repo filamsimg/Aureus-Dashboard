@@ -5,41 +5,30 @@ import TradingChart from "@/components/TradingChart";
 import ScalpCard from "@/components/ScalpCard";
 import RiskCard from "@/components/RiskCard";
 import MtfMatrix from "@/components/MtfMatrix";
-import AiReviewCard from "@/components/AiReviewCard";
 import JournalTable from "@/components/JournalTable";
 import { Candle } from "@/lib/indicators";
 import { ScalpSignal } from "@/lib/scalpEngine";
-import { AiReviewResult } from "@/lib/gemini";
 import { TradeEntry, JournalStats } from "@/lib/db";
 import {
   Volume2,
   VolumeX,
   RefreshCw,
-  Settings,
-  CheckCircle2,
-  X,
-  Power,
-  Server,
-  Smartphone,
-  ExternalLink,
+  Send,
+  Bot,
+  ShieldCheck,
+  TrendingUp,
 } from "lucide-react";
 
 export default function DashboardPage() {
-  // Mode state: 'active' or 'standby'
-  const [tradingMode, setTradingMode] = useState<"active" | "standby">("active");
-
   const [timeframe, setTimeframe] = useState<string>("M5");
   const [candles, setCandles] = useState<Candle[]>([]);
-  const [signal, setSignal] = useState<ScalpSignal | null>(null);
-  const [aiReview, setAiReview] = useState<AiReviewResult | null>(null);
-  const [isAiLoading, setIsAiLoading] = useState<boolean>(false);
+  const [signal, setSignal] = useState<(ScalpSignal & { isPaused?: boolean; vpsLive?: boolean }) | null>(null);
 
-  // Exness Account Balance (VPS MT5 or Smart Ledger)
-  const [accountBalance, setAccountBalance] = useState<number>(20.0);
+  // Exness Account Balance (SSOT from VPS MT5 / Bridge)
+  const [accountBalance, setAccountBalance] = useState<number>(31.85);
   const [accountCurrency, setAccountCurrency] = useState<string>("USD");
   const [accountLogin, setAccountLogin] = useState<string | number>("268119731");
   const [vpsConnected, setVpsConnected] = useState<boolean>(false);
-  const [vpsUrl, setVpsUrl] = useState<string>("http://109.111.52.163:8000");
 
   const [trades, setTrades] = useState<TradeEntry[]>([]);
   const [stats, setStats] = useState<JournalStats>({
@@ -55,10 +44,6 @@ export default function DashboardPage() {
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [countdown, setCountdown] = useState<number>(5);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
-
-  // Settings
-  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
-  const [geminiKey, setGeminiKey] = useState<string>("");
 
   const lastSignalDirRef = useRef<string | null>(null);
 
@@ -116,35 +101,32 @@ export default function DashboardPage() {
 
   const fetchAccount = useCallback(async () => {
     try {
-      const res = await fetch(`/api/account?vps_url=${encodeURIComponent(vpsUrl)}&_t=${Date.now()}`, {
+      const res = await fetch(`/api/account?_t=${Date.now()}`, {
         cache: "no-store",
       });
       const data = await res.json();
       if (data.status === "success" && data.account) {
         setAccountBalance(data.account.balance);
-        setAccountCurrency(data.account.currency);
-        setVpsConnected(data.account.connected);
+        setAccountCurrency(data.account.currency || "USD");
         if (data.account.login) setAccountLogin(data.account.login);
+        setVpsConnected(Boolean(data.account.connected));
       }
     } catch (err) {
       console.warn("Account fetch error:", err);
     }
-  }, [vpsUrl]);
+  }, []);
 
   const runAnalysis = useCallback(async () => {
-    if (tradingMode === "standby") {
-      setSignal(null);
-      return;
-    }
-
     try {
-      const res = await fetch(`/api/analyze?capital=${accountBalance}&mode=${tradingMode}`);
+      const res = await fetch(`/api/analyze?capital=${accountBalance}&_t=${Date.now()}`, {
+        cache: "no-store",
+      });
       const data = await res.json();
       if (data.status === "success" && data.signal) {
-        const sig: ScalpSignal = data.signal;
+        const sig: ScalpSignal & { isPaused?: boolean; vpsLive?: boolean } = data.signal;
         setSignal(sig);
 
-        // Sound chime on new signal change
+        // Sound chime on new confirmed signal change
         if (sig.direction !== "WAIT" && sig.direction !== lastSignalDirRef.current) {
           playChime(sig.direction === "BUY");
           showToast(`Sinyal Baru Terdeteksi: ${sig.signal}!`);
@@ -154,7 +136,7 @@ export default function DashboardPage() {
     } catch (err) {
       console.warn("Analysis error:", err);
     }
-  }, [tradingMode, accountBalance, playChime]);
+  }, [accountBalance, playChime]);
 
   const loadJournal = useCallback(async () => {
     try {
@@ -168,63 +150,6 @@ export default function DashboardPage() {
       console.warn("Journal fetch error:", err);
     }
   }, []);
-
-  const handleRequestAiReview = async () => {
-    if (!signal || signal.direction === "WAIT") {
-      showToast("Tunggu hingga setup BUY atau SELL terkonfirmasi.");
-      return;
-    }
-
-    setIsAiLoading(true);
-    try {
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ signal, customApiKey: geminiKey }),
-      });
-      const data = await res.json();
-      if (data.status === "success" && data.review) {
-        setAiReview(data.review);
-        showToast("Review Analis AI Siap!");
-      } else {
-        showToast("Review AI gagal: " + (data.message || "Periksa API key"));
-      }
-    } catch (err) {
-      showToast("Koneksi API AI terputus.");
-    } finally {
-      setIsAiLoading(false);
-    }
-  };
-
-  const handleRecordTrade = async () => {
-    if (!signal || signal.direction === "WAIT") {
-      showToast("Hanya setup BUY atau SELL yang dapat dicatat ke jurnal.");
-      return;
-    }
-
-    try {
-      const res = await fetch("/api/journal", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          symbol: "BTCUSD",
-          direction: signal.direction,
-          entryPrice: signal.entryPrice,
-          stopLoss: signal.stopLoss,
-          takeProfit: signal.takeProfit1,
-          lotSize: signal.risk.fixedLot,
-          notes: `${signal.reasons.join(", ")} ${aiReview ? `| ${aiReview.verdict}` : ""}`,
-        }),
-      });
-      const data = await res.json();
-      if (data.status === "success") {
-        showToast("Order berhasil dicatat ke Jurnal!");
-        loadJournal();
-      }
-    } catch (err) {
-      showToast("Gagal mencatat trade ke jurnal.");
-    }
-  };
 
   const handleUpdateStatus = async (
     id: number,
@@ -246,16 +171,14 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
+    // Clean up any legacy exposed settings from previous versions
+    localStorage.removeItem("aureus_vps_url");
+    localStorage.removeItem("aureus_gemini_key");
+
     loadCandles(timeframe);
     fetchAccount();
     runAnalysis();
     loadJournal();
-
-    const savedKey = localStorage.getItem("aureus_gemini_key");
-    if (savedKey) setGeminiKey(savedKey);
-
-    const savedVps = localStorage.getItem("aureus_vps_url");
-    if (savedVps) setVpsUrl(savedVps);
 
     const timer = setInterval(() => {
       setCountdown((prev) => {
@@ -296,12 +219,12 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Center: MT5 Balance & Token-Saving Toggle */}
+          {/* Center: MT5 Real Balance & Bot Telegram State Badge */}
           <div className="flex items-center gap-2.5">
-            {/* Real Balance from VPS MT5 / Smart Ledger */}
+            {/* Real Balance from VPS MT5 */}
             <div
               className="flex items-center gap-2.5 bg-zinc-900/90 border border-zinc-800/80 rounded-xl px-3.5 py-2 text-xs sm:text-sm"
-              title={`Akun: #${accountLogin} (${vpsConnected ? "VPS MT5 Terhubung (Live)" : "Smart Ledger Mode"})`}
+              title={`Akun: #${accountLogin} (${vpsConnected ? "VPS MT5 Terhubung Live" : "Estimasi Akun"})`}
             >
               <span
                 className={`w-2.5 h-2.5 rounded-full ${
@@ -323,30 +246,33 @@ export default function DashboardPage() {
               </span>
             </div>
 
-            {/* Token-Saving Mode Switch */}
-            <button
-              onClick={() => {
-                const next = tradingMode === "active" ? "standby" : "active";
-                setTradingMode(next);
-                showToast(
-                  next === "active"
-                    ? "Mode Trading Aktif: Memindai grafik BTC"
-                    : "Mode Standby Aktif: API AI tidur (Hemat Token 100%)"
-                );
-              }}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold border transition active:scale-95 ${
-                tradingMode === "active"
-                  ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30"
-                  : "bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-zinc-200"
+            {/* Bot Autonomous Status Badge (Controlled via Telegram) */}
+            <div
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs sm:text-sm font-bold border transition ${
+                signal?.isPaused
+                  ? "bg-amber-500/10 text-amber-300 border-amber-500/30"
+                  : "bg-emerald-500/10 text-emerald-300 border-emerald-500/30"
               }`}
             >
-              <Power className="w-4 h-4" />
-              <span>{tradingMode === "active" ? "Trading Aktif" : "Standby (Hemat)"}</span>
-            </button>
+              <Bot className="w-4 h-4 text-emerald-400" />
+              <span>{signal?.isPaused ? "Bot Dijeda (Telegram)" : "Auto-Trade Aktif (VPS)"}</span>
+            </div>
           </div>
 
           {/* Right Controls */}
           <div className="flex items-center gap-2">
+            {/* Telegram Master Control */}
+            <a
+              href="https://t.me/AureusAITraderBot"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-xs sm:text-sm font-bold transition active:scale-95"
+              title="Buka Telegram Bot (@AureusAITraderBot) untuk perintah /start dan /stop"
+            >
+              <Send className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="hidden sm:inline">Telegram Bot</span>
+            </a>
+
             {/* Audio Toggle */}
             <button
               onClick={() => {
@@ -373,50 +299,29 @@ export default function DashboardPage() {
               <RefreshCw className="w-4 h-4 text-zinc-400" />
               <span className="text-zinc-300 tabular-nums">{countdown}s</span>
             </button>
-
-            {/* Settings Modal Button */}
-            <button
-              onClick={() => setIsSettingsOpen(true)}
-              className="p-2.5 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border border-zinc-800/80 transition active:scale-95"
-              title="Pengaturan"
-            >
-              <Settings className="w-4 h-4 text-zinc-300" />
-            </button>
           </div>
         </div>
       </header>
 
-      {/* Toast Notification */}
-      {toastMsg && (
-        <div className="fixed bottom-6 right-6 z-50 bg-zinc-900/95 border border-zinc-700/80 text-zinc-100 text-sm font-semibold px-4 py-3 rounded-2xl shadow-xl flex items-center gap-2.5 transition animate-bounce">
-          <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />
-          <span>{toastMsg}</span>
-        </div>
-      )}
+      {/* Main Container */}
+      <main className="max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-6 flex-1">
+        {/* Toast Notification */}
+        {toastMsg && (
+          <div className="fixed bottom-6 right-6 z-50 bg-emerald-500 text-zinc-950 font-bold px-4 py-2.5 rounded-xl shadow-lg border border-emerald-400 text-sm animate-bounce">
+            {toastMsg}
+          </div>
+        )}
 
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-4 sm:space-y-5">
-        {/* Simple Workflow Guide Bar */}
-        <div className="bg-[#121215] border border-zinc-800/80 rounded-2xl px-5 py-3 flex flex-wrap items-center justify-between gap-3 text-xs sm:text-sm">
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-            <span className="font-extrabold text-zinc-100 flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-cyan-400"></span>
-              Alur Scalping:
-            </span>
-            <span className="text-zinc-300 font-medium">
-              <strong className="text-zinc-100">1. Pantau Status</strong> (Kuning = Tahan Saldo • Hijau = Beli • Merah = Jual)
-            </span>
-            <span className="text-zinc-600 hidden sm:inline">•</span>
-            <span className="text-zinc-300 font-medium">
-              <strong className="text-zinc-100">2. Salin Parameter</strong> (Lot 0.01, SL, TP1)
-            </span>
-            <span className="text-zinc-600 hidden sm:inline">•</span>
-            <span className="text-zinc-300 font-medium">
-              <strong className="text-zinc-100">3. Eksekusi di MT5</strong>
+        {/* Autonomous Mode Banner */}
+        <div className="bg-[#121215] border border-zinc-800/80 rounded-2xl px-5 py-3.5 flex flex-wrap items-center justify-between gap-4 text-xs">
+          <div className="flex items-center gap-3">
+            <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></div>
+            <span className="font-semibold text-zinc-200">
+              <strong className="text-emerald-400">Mode Otonom 24/7 Aktif:</strong> Bot memindai BTCUSDm di VPS Exness Real • Kendali satu pintu via Telegram <strong>@AureusAITraderBot</strong>
             </span>
           </div>
           <div className="text-xs text-zinc-300 bg-zinc-900 px-3 py-1 rounded-full border border-zinc-800 font-bold">
-            Exness BTCUSD • Saldo ${accountBalance.toFixed(2)} {accountCurrency}
+            Exness BTCUSDm • Saldo ${accountBalance.toFixed(2)} {accountCurrency}
           </div>
         </div>
 
@@ -454,39 +359,71 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* TradingView Lightweight Chart */}
-            <div className="min-h-[460px] w-full rounded-xl overflow-hidden border border-zinc-800/60 bg-[#121214]">
+            <div className="flex-1 min-h-[350px]">
               <TradingChart candles={candles} signal={signal} timeframe={timeframe} />
             </div>
 
-            <div className="flex items-center justify-between pt-3 mt-2.5 border-t border-zinc-800/70 text-xs text-zinc-400 font-medium">
-              <span>Garis Putus-putus: Hijau = Target TP • Merah = Batas SL</span>
-              <span className="text-zinc-300 font-semibold">Timeframe: {timeframe}</span>
+            <div className="flex items-center justify-between text-xs text-zinc-400 mt-3 pt-2.5 border-t border-zinc-800/70">
+              <span className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                <span>Feed Harga Live Exness VPS</span>
+              </span>
+              <span>Timeframe: {timeframe}</span>
             </div>
           </div>
 
           {/* Scalp Signal Card (5 Cols) */}
           <div className="lg:col-span-5 flex flex-col">
-            <ScalpCard
-              signal={signal}
-              mode={tradingMode}
-              onRecordTrade={handleRecordTrade}
-              onRequestAiReview={handleRequestAiReview}
-              isAiLoading={isAiLoading}
-            />
+            <ScalpCard signal={signal} />
           </div>
         </div>
 
-        {/* Row 2: Risk Guardian ($20 Capital) & AI Review */}
+        {/* Row 2: Risk Guardian & VPS Profit Ladder Info */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {signal && <RiskCard risk={signal.risk} />}
-          {signal && (
-            <AiReviewCard
-              review={aiReview}
-              actionGuide={signal.actionGuide}
-              invalidation={signal.invalidation}
-            />
-          )}
+          <div className="bg-[#121215] border border-zinc-800/80 rounded-2xl p-5 shadow-sm text-sm flex flex-col justify-between">
+            <div className="flex items-center justify-between pb-3 mb-3 border-b border-zinc-800/70">
+              <span className="font-extrabold text-zinc-100 text-sm sm:text-base flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-cyan-400" />
+                Sistem Otonom & Tangga Profit (VPS MT5)
+              </span>
+              <span
+                className={`px-3 py-1 rounded-full text-xs font-black tracking-wide ${
+                  signal?.isPaused
+                    ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                    : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                }`}
+              >
+                {signal?.isPaused ? "DIJEDA (TELEGRAM)" : "SIAGA 24/7"}
+              </span>
+            </div>
+
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-900/80 border border-zinc-800/70">
+                <span className="font-semibold text-zinc-300 flex items-center gap-1.5">
+                  <TrendingUp className="w-3.5 h-3.5 text-emerald-400" /> Tangga 1 (+100 poin)
+                </span>
+                <span className="font-extrabold text-emerald-400">Kunci 50% Profit (+60 pts / +$0.60)</span>
+              </div>
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-900/80 border border-zinc-800/70">
+                <span className="font-semibold text-zinc-300 flex items-center gap-1.5">
+                  <TrendingUp className="w-3.5 h-3.5 text-emerald-400" /> Tangga 2 (+110 poin)
+                </span>
+                <span className="font-extrabold text-emerald-400">Kunci 75% Profit (+90 pts / +$0.90)</span>
+              </div>
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-900/80 border border-zinc-800/70">
+                <span className="font-semibold text-zinc-300 flex items-center gap-1.5">
+                  <TrendingUp className="w-3.5 h-3.5 text-emerald-400" /> Target Penuh (+120 poin)
+                </span>
+                <span className="font-extrabold text-emerald-300">Target TP1 100% (+120 pts / +$1.20)</span>
+              </div>
+            </div>
+
+            <div className="text-xs text-zinc-400 mt-3 pt-3 border-t border-zinc-800/70 flex items-center justify-between">
+              <span>Kendali Master: <strong>@AureusAITraderBot</strong></span>
+              <span className="text-emerald-400 font-bold">{signal?.isPaused ? "Ketik /start di Telegram" : "Aktif Memindai 24/7"}</span>
+            </div>
+          </div>
         </div>
 
         {/* Row 3: Multi-Timeframe Matrix */}
@@ -495,74 +432,6 @@ export default function DashboardPage() {
         {/* Row 4: Trade Journal Table */}
         <JournalTable trades={trades} stats={stats} onUpdateStatus={handleUpdateStatus} />
       </main>
-
-      {/* Settings Modal */}
-      {isSettingsOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-[#121215] border border-zinc-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
-            <button
-              onClick={() => setIsSettingsOpen(false)}
-              className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-200 p-1 rounded-lg"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <h3 className="font-bold text-sm text-zinc-100 mb-1 flex items-center gap-2">
-              <Settings className="w-4 h-4 text-zinc-400" /> Pengaturan Sistem
-            </h3>
-            <p className="text-xs text-zinc-400 mb-5 leading-relaxed">
-              Atur koneksi VPS pembaca saldo Exness MT5 dan kunci Google Gemini AI.
-            </p>
-
-            <div className="space-y-4 text-xs">
-              <div>
-                <label className="text-zinc-300 block mb-1 font-semibold flex items-center gap-1.5">
-                  <Server className="w-3.5 h-3.5 text-zinc-400" /> URL Jembatan VPS MT5:
-                </label>
-                <input
-                  type="text"
-                  placeholder="http://109.111.52.163:8000"
-                  value={vpsUrl}
-                  onChange={(e) => setVpsUrl(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 focus:outline-none focus:border-zinc-500"
-                />
-                <span className="text-[11px] text-zinc-500 block mt-1">
-                  IP VPS tempat MT5 Exness Anda terpasang (Port 8000).
-                </span>
-              </div>
-
-              <div>
-                <label className="text-zinc-300 block mb-1 font-semibold">Google Gemini API Key:</label>
-                <input
-                  type="password"
-                  placeholder="AIzaSy..."
-                  value={geminiKey}
-                  onChange={(e) => setGeminiKey(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 focus:outline-none focus:border-zinc-500"
-                />
-                <span className="text-[11px] text-zinc-500 block mt-1">
-                  Sudah terisi otomatis dari sistem. Bisa diubah jika ingin memakai key lain.
-                </span>
-              </div>
-            </div>
-
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                onClick={() => {
-                  localStorage.setItem("aureus_gemini_key", geminiKey);
-                  localStorage.setItem("aureus_vps_url", vpsUrl);
-                  setIsSettingsOpen(false);
-                  fetchAccount();
-                  showToast("Pengaturan disimpan!");
-                }}
-                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-xs font-semibold px-4 py-2 rounded-xl border border-zinc-700 transition active:scale-95"
-              >
-                Simpan
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -1,24 +1,29 @@
 """
-Aureus AI Sniper Bot - Production-Grade Automated Scalper for MT5 (Exness Real)
+Aureus AI Sniper Bot - Autonomous Multi-Timeframe Scalper for MT5 (Exness Real)
 Features:
+- SSOT Architecture: Reads all configuration from .env
+- Multi-Timeframe Scoring Matrix (M1, M5, M15) - Shared Ground Truth
 - Fixed 0.01 lot, Strict Single Bullet (Anti-Averaging, Anti-Martingale)
 - Step-Ladder Ratchet Trailing:
   * Stage 1 (+100 pts): Move SL to +50% target (+60 pts / +$0.60)
   * Stage 2 (+110 pts): Move SL to +75% target (+90 pts / +$0.90)
   * Stage 3 (+120 pts): Move SL to +100% TP1 (+120 pts / +$1.20), trail to TP2
 - Hard Daily Circuit Breaker: Max 2 consecutive losses / -$1.80 daily stop
-- Instant Telegram Alerts & Interactive Commands (/status, /saldo, /start, /stop)
+- Clean Telegram Bot Integration: Reset shortcuts via setMyCommands, interactive commands:
+  /status, /saldo, /start, /stop, /help
 """
 
 import os
 import sys
 import time
 import json
+import ssl
 import logging
 import threading
 import urllib.request
 import urllib.parse
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
+from pathlib import Path
 
 try:
     import MetaTrader5 as mt5
@@ -30,24 +35,55 @@ except ImportError:
 logger = logging.getLogger("AureusSniper")
 
 # ==========================================
-# 1. KONFIGURASI BOT & TELEGRAM
+# 1. LOAD CONFIGURATION (SSOT)
 # ==========================================
-TELEGRAM_BOT_TOKEN = "9034455461:AAE3kk8SYeAt1RRGd0G8Td4tFTX7EC3gQBQ"
-TELEGRAM_CHAT_ID = "1432798032"
+def load_env_file():
+    """Load .env file if available in working dir or parent."""
+    candidates = [
+        Path.cwd() / ".env",
+        Path.cwd() / ".env.local",
+        Path(__file__).resolve().parent / ".env",
+        Path("C:/AureusBridge/.env"),
+    ]
+    for p in candidates:
+        if p.exists():
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        if "=" in line:
+                            k, v = line.split("=", 1)
+                            k = k.strip()
+                            v = v.strip().strip('"').strip("'")
+                            if k not in os.environ:
+                                os.environ[k] = v
+                break
+            except Exception as e:
+                logger.warning(f"Error loading {p}: {e}")
 
-SYMBOL_TARGET = "BTCUSDm"
-MAGIC_NUMBER = 778898
-FIXED_LOT = 0.01
+load_env_file()
 
-# Batas Risiko & Parameter Target (Khusus Modal $24.26)
-DEFAULT_SL_POINTS = 80.0     # 80 poin = -$0.80 USD
-TARGET_TP1_POINTS = 120.0    # 120 poin = +$1.20 USD
-TARGET_TP2_POINTS = 200.0    # 200 poin = +$2.00 USD
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
-DAILY_LOSS_LIMIT_USD = 1.80  # Max rugi harian -$1.80 (7.4% modal)
-MAX_CONSECUTIVE_LOSS = 2     # Max 2x loss berturut-turut
-COOLDOWN_SECONDS = 900       # 15 menit jeda setelah loss
+SYMBOL_TARGET = os.getenv("SYMBOL_TARGET", "BTCUSDm")
+MAGIC_NUMBER = int(os.getenv("MAGIC_NUMBER", "778898"))
+FIXED_LOT = float(os.getenv("FIXED_LOT", "0.01"))
 
+DEFAULT_SL_POINTS = float(os.getenv("DEFAULT_SL_POINTS", "80.0"))     # 80 poin = -$0.80 USD
+TARGET_TP1_POINTS = float(os.getenv("TARGET_TP1_POINTS", "120.0"))   # 120 poin = +$1.20 USD
+TARGET_TP2_POINTS = float(os.getenv("TARGET_TP2_POINTS", "200.0"))   # 200 poin = +$2.00 USD
+
+DAILY_LOSS_LIMIT_USD = float(os.getenv("DAILY_LOSS_LIMIT_USD", "1.80"))
+MAX_CONSECUTIVE_LOSS = int(os.getenv("MAX_CONSECUTIVE_LOSS", "2"))
+COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", "900"))          # 15 menit
+CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "55.0"))
+
+# ==========================================
+# 2. TELEGRAM CLIENT (CLEAN COMMANDS)
+# ==========================================
 class TelegramClient:
     def __init__(self, token: str, chat_id: str):
         self.token = token
@@ -55,9 +91,36 @@ class TelegramClient:
         self.base_url = f"https://api.telegram.org/bot{self.token}"
         self.last_update_id = 0
         self.listener_running = False
+        try:
+            self.ssl_context = ssl._create_unverified_context()
+        except Exception:
+            self.ssl_context = None
+
+    def reset_telegram_shortcuts(self):
+        """Hapus seluruh shortcut lama (seperti /history) dan daftarkan perintah resmi."""
+        if not self.token:
+            return
+        url = f"{self.base_url}/setMyCommands"
+        commands = [
+            {"command": "status", "description": "Cek posisi aktif, level profit & harga live"},
+            {"command": "saldo", "description": "Cek saldo riil, equity & margin Exness"},
+            {"command": "start", "description": "Nyalakan pemindaian pasar & auto-trade"},
+            {"command": "stop", "description": "Jeda bot sementara (tahan saldo)"},
+            {"command": "help", "description": "Panduan singkat perintah bot"}
+        ]
+        try:
+            data = json.dumps({"commands": commands}).encode("utf-8")
+            req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+            kwargs = {"timeout": 10}
+            if self.ssl_context:
+                kwargs["context"] = self.ssl_context
+            with urllib.request.urlopen(req, **kwargs) as resp:
+                if resp.status == 200:
+                    logger.info("✓ Shortcut Telegram berhasil di-reset & didaftarkan.")
+        except Exception as e:
+            logger.warning(f"Gagal reset Telegram commands: {e}")
 
     def send(self, text: str, keyboard: bool = True) -> bool:
-        """Kirim pesan format rapi ke Telegram."""
         if not self.token or not self.chat_id:
             return False
         url = f"{self.base_url}/sendMessage"
@@ -79,15 +142,18 @@ class TelegramClient:
         try:
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=5) as resp:
+            kwargs = {"timeout": 10}
+            if self.ssl_context:
+                kwargs["context"] = self.ssl_context
+            with urllib.request.urlopen(req, **kwargs) as resp:
                 return resp.status == 200
         except Exception as e:
             logger.warning(f"Telegram send error: {e}")
             return False
 
     def start_polling(self, bot_instance):
-        """Mendengarkan perintah interaktif dari user di Telegram."""
         self.listener_running = True
+        self.reset_telegram_shortcuts()
         t = threading.Thread(target=self._poll_loop, args=(bot_instance,), daemon=True)
         t.start()
 
@@ -96,7 +162,10 @@ class TelegramClient:
             try:
                 url = f"{self.base_url}/getUpdates?offset={self.last_update_id + 1}&timeout=10"
                 req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                with urllib.request.urlopen(req, timeout=15) as resp:
+                kwargs = {"timeout": 15}
+                if self.ssl_context:
+                    kwargs["context"] = self.ssl_context
+                with urllib.request.urlopen(req, **kwargs) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     if data.get("ok") and "result" in data:
                         for u in data["result"]:
@@ -105,23 +174,26 @@ class TelegramClient:
                             text = (msg.get("text") or "").strip().lower()
                             from_id = str(msg.get("chat", {}).get("id", ""))
                             if from_id == self.chat_id:
+                                logger.info(f"Telegram command diterima: {text}")
                                 self._handle_command(text, bot)
-            except Exception as e:
+            except Exception:
                 time.sleep(3)
             time.sleep(1)
 
     def _handle_command(self, cmd: str, bot):
-        if cmd in ["/status", "status"]:
+        # Clean clean command parsing
+        clean_cmd = cmd.split("@")[0].strip()
+        if clean_cmd in ["/status", "status"]:
             self.send(bot.get_status_text())
-        elif cmd in ["/saldo", "saldo", "balance"]:
+        elif clean_cmd in ["/saldo", "saldo", "balance"]:
             self.send(bot.get_balance_text())
-        elif cmd in ["/stop", "stop", "jeda"]:
+        elif clean_cmd in ["/stop", "stop", "jeda"]:
             bot.is_paused = True
-            self.send("⏸️ <b>BOT DIJEDA OLEH PENGGUNA</b>\n\nBot tidak akan membuka transaksi baru. Posisi terbuka tetap dikawal.")
-        elif cmd in ["/start", "start", "nyalakan"]:
+            self.send("⏸️ <b>BOT DIJEDA OLEH PENGGUNA</b>\n\nBot tidak akan membuka order baru di MT5. Radar analisa pasar tetap aktif memantau di web.")
+        elif clean_cmd in ["/start", "start", "nyalakan"]:
             bot.is_paused = False
-            self.send("▶️ <b>BOT DIAKTIFKAN KEMBALI</b>\n\nBot kembali memindai pasar BTCUSDm dengan disiplin modal.")
-        elif cmd in ["/help", "help"]:
+            self.send("▶️ <b>BOT DIAKTIFKAN KEMBALI</b>\n\nBot kembali memindai & siap mengeksekusi order 0.01 lot BTCUSDm saat sinyal terkonfirmasi (>= 55%).")
+        elif clean_cmd in ["/help", "help"]:
             self.send(
                 "🤖 <b>PERINTAH BOT AUREUS</b>\n\n"
                 "/status - Cek posisi berjalan & harga live\n"
@@ -130,6 +202,9 @@ class TelegramClient:
                 "/start - Lanjutkan pemindaian pasar"
             )
 
+# ==========================================
+# 3. AUREUS SNIPER BOT CLASS
+# ==========================================
 class AureusSniperBot:
     def __init__(self):
         self.telegram = TelegramClient(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
@@ -144,11 +219,24 @@ class AureusSniperBot:
 
         # Posisi aktif tracking
         self.tracked_ticket = None
-        self.ladder_stage = 0 # 0: None, 1: 50% locked, 2: 75% locked, 3: 100% locked
+        self.ladder_stage = 0  # 0: None, 1: 50%, 2: 75%, 3: 100%
         self.entry_price = 0.0
-        self.pos_type = None # "BUY" or "SELL"
+        self.pos_type = None   # "BUY" or "SELL"
 
-        # Memulai listener Telegram
+        # State analisa terakhir untuk disinkronkan ke Web Dashboard (SSOT)
+        self.latest_analysis = {
+            "status": "initializing",
+            "direction": "WAIT",
+            "score": 0,
+            "confidencePercent": 0,
+            "signal": "TUNGGU (WAIT)",
+            "atr_m5": 90.0,
+            "reasons": ["Menginisialisasi pemindaian multi-timeframe..."],
+            "updated_at": int(time.time()),
+            "is_paused": False,
+        }
+
+        # Start Telegram listener
         self.telegram.start_polling(self)
 
     def reset_daily_stats_if_new_day(self):
@@ -161,59 +249,45 @@ class AureusSniperBot:
             logger.info("Hari baru! Statistik harian di-reset.")
             self.telegram.send(f"🌅 <b>SESI HARI BARU ({today.strftime('%d %b %Y')})</b>\nSistem siap memindai peluang BTCUSDm.")
 
-    def run_cycle(self, acc_info: dict, current_tick: dict, candles_m5: list):
-        """Dipanggil setiap 1-2 detik oleh worker thread."""
+    def run_cycle(self, acc_info: dict, current_tick: dict, candles_m1: list, candles_m5: list, candles_m15: list):
+        """Dipanggil setiap detik oleh worker thread."""
         if not MT5_AVAILABLE:
             return
 
         self.reset_daily_stats_if_new_day()
 
-        # 1. Pantau posisi terbuka saat ini
+        # 1. Pantau posisi terbuka saat ini (Tangga Profit 50%, 75%, 100%)
         pos = self._get_open_position()
         if pos:
             self._manage_open_position(pos, current_tick)
             return
 
-        # Jika posisi yang sebelumnya di-track ternyata sudah tertutup
+        # Jika posisi tertutup
         if self.tracked_ticket is not None:
             self._handle_position_closed(self.tracked_ticket, acc_info)
             self.tracked_ticket = None
             self.ladder_stage = 0
             self.pos_type = None
 
-        # 2. Cek apakah bot sedang dijeda atau terkena Circuit Breaker
-        if self.is_paused:
-            return
+        # 2. Update status flag analisa untuk Web Radar (SSOT)
+        self.latest_analysis["is_paused"] = self.is_paused
+        self.latest_analysis["circuit_breaker"] = self.circuit_breaker_active
 
-        if self.circuit_breaker_active:
-            return
-
-        # Cooldown check
-        if time.time() - self.last_loss_time < COOLDOWN_SECONDS:
-            return
-
-        # 3. Analisa Peluang Masuk (Entry Matrix)
-        self._evaluate_and_enter(current_tick, candles_m5, acc_info)
+        # 3. Analisa Multi-Timeframe Scoring (SSOT) - Tetap memindai pasar untuk display Web Radar
+        self._evaluate_and_enter(current_tick, candles_m1, candles_m5, candles_m15, acc_info)
 
     def _get_open_position(self):
-        """Membaca posisi aktif milik bot (magic number 778898)."""
         positions = mt5.positions_get(symbol=SYMBOL_TARGET)
         if not positions:
-            # Fallback jika simbol bernama BTCUSD
             positions = mt5.positions_get()
         if positions:
             for p in positions:
-                if p.magic == MAGIC_NUMBER or "BTC" in p.symbol:
+                if p.magic == MAGIC_NUMBER:
                     return p
         return None
 
     def _manage_open_position(self, pos, current_tick):
-        """
-        EKSEKUSI TANGGA PENGUNCI PROFIT BERTINGKAT:
-        - +100 poin -> Geser SL ke 50% target (+60 poin / +$0.60)
-        - +110 poin -> Kerek SL ke 75% target (+90 poin / +$0.90)
-        - +120 poin (TP1) -> Kunci 100% TP1 (+120 poin / +$1.20)
-        """
+        """Kawal posisi aktif dengan Tangga Pengunci Profit Bertingkat."""
         ticket = pos.ticket
         self.tracked_ticket = ticket
         entry = float(pos.price_open)
@@ -231,10 +305,30 @@ class AureusSniperBot:
             return
 
         pnl_pts = (cur_price - entry) if is_buy else (entry - cur_price)
+        pnl_usd = round(pnl_pts * 0.01, 2)
+        stages = ["Memantau Target (+100)", "Lock 50% Profit", "Lock 75% Profit", "Lock 100% TP1"]
+        stage_desc = stages[min(self.ladder_stage, 3)]
 
-        # -------------------------------------------------------------
-        # TANGGA 1: Capai +100 poin -> Kunci 50% Target (+60 pts / +$0.60)
-        # -------------------------------------------------------------
+        # Update latest_analysis saat ada posisi aktif agar Web Dashboard sinkron sempurna
+        self.latest_analysis = {
+            "status": "active",
+            "direction": self.pos_type,
+            "score": 100 if self.pos_type == "BUY" else -100,
+            "confidencePercent": 100,
+            "signal": f"POSISI AKTIF: {self.pos_type}",
+            "atr_m5": 90.0,
+            "reasons": [
+                f"Order #{ticket} {self.pos_type} 0.01 lot di ${entry:,.2f}",
+                f"Floating PnL: {'+' if pnl_usd >= 0 else ''}${pnl_usd:.2f} USD",
+                f"Status Tangga: {stage_desc}"
+            ],
+            "updated_at": int(time.time()),
+            "is_paused": self.is_paused,
+            "daily_pnl": round(self.daily_pnl_usd, 2),
+            "circuit_breaker": self.circuit_breaker_active,
+        }
+
+        # Tangga 1: +100 poin -> Lock 50% target (+60 pts / +$0.60)
         if pnl_pts >= 100.0 and self.ladder_stage < 1:
             target_sl = round(entry + 60.0 if is_buy else entry - 60.0, 2)
             if (is_buy and target_sl > cur_sl) or (not is_buy and (cur_sl == 0 or target_sl < cur_sl)):
@@ -246,13 +340,11 @@ class AureusSniperBot:
                         f"Pair     : {SYMBOL_TARGET} ({self.pos_type})\n"
                         f"Floating : +${pnl_pts * 0.01:.2f} USD\n"
                         f"Aksi     : SL digeser ke <b>${target_sl:,.2f}</b>\n"
-                        f"Status   : <b>+$0.60 USD (50%) Terjamin Masuk Saldo!</b>"
+                        f"Status   : <b>+$0.60 USD Terjamin Masuk Saldo!</b>"
                     )
                     self.telegram.send(msg)
 
-        # -------------------------------------------------------------
-        # TANGGA 2: Capai +110 poin -> Kerek SL ke 75% Target (+90 pts / +$0.90)
-        # -------------------------------------------------------------
+        # Tangga 2: +110 poin -> Lock 75% target (+90 pts / +$0.90)
         if pnl_pts >= 110.0 and self.ladder_stage < 2:
             target_sl = round(entry + 90.0 if is_buy else entry - 90.0, 2)
             if (is_buy and target_sl > cur_sl) or (not is_buy and (cur_sl == 0 or target_sl < cur_sl)):
@@ -264,14 +356,12 @@ class AureusSniperBot:
                         f"Pair     : {SYMBOL_TARGET} ({self.pos_type})\n"
                         f"Floating : +${pnl_pts * 0.01:.2f} USD\n"
                         f"Aksi     : SL dinaikkan ke <b>${target_sl:,.2f}</b>\n"
-                        f"Status   : <b>+$0.90 USD (75%) Sukses Diamankan!</b>\n"
+                        f"Status   : <b>+$0.90 USD Sukses Diamankan!</b>\n"
                         f"Target   : Menuju TP1 penuh ($1.20)"
                     )
                     self.telegram.send(msg)
 
-        # -------------------------------------------------------------
-        # TANGGA 3: Capai +120 poin (TP1) -> Kunci 100% TP1 (+120 pts / +$1.20)
-        # -------------------------------------------------------------
+        # Tangga 3: +120 poin (TP1) -> Lock 100% TP1 (+120 pts / +$1.20), lepas ke TP2
         if pnl_pts >= 120.0 and self.ladder_stage < 3:
             target_sl = round(entry + 120.0 if is_buy else entry - 120.0, 2)
             target_tp2 = round(entry + TARGET_TP2_POINTS if is_buy else entry - TARGET_TP2_POINTS, 2)
@@ -283,7 +373,7 @@ class AureusSniperBot:
                         f"────────────────────────\n"
                         f"Pair     : {SYMBOL_TARGET} ({self.pos_type})\n"
                         f"Aksi     : SL di-lock di level TP1 (${target_sl:,.2f})\n"
-                        f"Status   : <b>+$1.20 USD (100% Target) Milik Anda!</b>\n"
+                        f"Status   : <b>+$1.20 USD Milik Anda!</b>\n"
                         f"Next     : Posisi bebas berlari mengejar TP2 (+$2.00)"
                     )
                     self.telegram.send(msg)
@@ -300,10 +390,10 @@ class AureusSniperBot:
         return res is not None and res.retcode == mt5.TRADE_RETCODE_DONE
 
     def _handle_position_closed(self, ticket: int, acc_info: dict):
-        """Membaca deals history untuk mendapatkan hasil resmi order yang baru selesai."""
-        time.sleep(1) # Tunggu sejenak agar deals tersinkron
+        time.sleep(1)
         now = datetime.now()
-        deals = mt5.history_deals_get(position=ticket)
+        from_time = now - timedelta(days=2)
+        deals = mt5.history_deals_get(from_time, now + timedelta(days=1), position=ticket)
         pnl = 0.0
         if deals:
             for d in deals:
@@ -311,7 +401,8 @@ class AureusSniperBot:
                     pnl = float(d.profit)
 
         self.daily_pnl_usd += pnl
-        current_bal = acc_info.get("balance", 24.26)
+        current_bal = acc_info.get("balance", 31.85)
+        pnl_sign = "+" if self.daily_pnl_usd >= 0 else "-"
 
         if pnl > 0:
             self.daily_consecutive_losses = 0
@@ -320,7 +411,7 @@ class AureusSniperBot:
                 f"────────────────────────\n"
                 f"Hasil    : <b>+${pnl:.2f} USD</b>\n"
                 f"Saldo    : <b>${current_bal:.2f} USD</b>\n"
-                f"PnL Hari : +${self.daily_pnl_usd:.2f} USD\n"
+                f"PnL Hari : {pnl_sign}${abs(self.daily_pnl_usd):.2f} USD\n"
                 f"Status   : Bersiap mencari momentum sniper berikutnya."
             )
             self.telegram.send(msg)
@@ -337,7 +428,6 @@ class AureusSniperBot:
             )
             self.telegram.send(msg)
 
-            # Circuit Breaker Check
             if (self.daily_consecutive_losses >= MAX_CONSECUTIVE_LOSS) or (self.daily_pnl_usd <= -DAILY_LOSS_LIMIT_USD):
                 self.circuit_breaker_active = True
                 cb_msg = (
@@ -350,50 +440,138 @@ class AureusSniperBot:
                 )
                 self.telegram.send(cb_msg)
 
-    def _evaluate_and_enter(self, current_tick: dict, candles_m5: list, acc_info: dict):
-        """Memindai peluang beli/jual berdasarkan konfluensi multi-timeframe."""
+    def _evaluate_and_enter(self, current_tick: dict, candles_m1: list, candles_m5: list, candles_m15: list, acc_info: dict):
+        """
+        Unified Multi-Timeframe Scoring Matrix (M1, M5, M15) - SSOT Engine
+        """
         if len(candles_m5) < 30:
             return
 
-        # 1. Hitung ATR M5 untuk proteksi volatilitas liar
-        closes = [c["close"] for c in candles_m5]
-        highs = [c["high"] for c in candles_m5]
-        lows = [c["low"] for c in candles_m5]
-        
-        ranges = [h - l for h, l in zip(highs[-14:], lows[-14:])]
-        atr_m5 = sum(ranges) / len(ranges) if ranges else 80.0
+        closes_m5 = [c["close"] for c in candles_m5]
+        highs_m5 = [c["high"] for c in candles_m5]
+        lows_m5 = [c["low"] for c in candles_m5]
 
-        if atr_m5 > 140.0:
-            # Pasar Liar -> Tahan diri
-            return
+        # 1. Proteksi Volatilitas (ATR M5)
+        ranges = [h - l for h, l in zip(highs_m5[-14:], lows_m5[-14:])]
+        atr_m5 = sum(ranges) / len(ranges) if ranges else 90.0
 
-        # 2. Hitung RSI(7) M5
-        rsi7 = self._calc_rsi(closes, 7)
-        cur_price = current_tick.get("bid", closes[-1])
-        
-        # 3. EMA 9 dan 21
-        ema9 = self._calc_ema(closes, 9)
-        ema21 = self._calc_ema(closes, 21)
+        is_wild = (atr_m5 > 160.0)
 
-        # 4. Deteksi Setup BUY / SELL
-        direction = None
+        # 2. Indikator M15 Trend Filter (Bobot 30%)
+        score = 0
         reasons = []
 
-        # Kondisi BUY: RSI Oversold membal naik + Trend EMA positif
-        if rsi7 <= 28.0 and cur_price > ema9:
+        if len(candles_m15) >= 20:
+            closes_m15 = [c["close"] for c in candles_m15]
+            ema9_m15 = self._calc_ema(closes_m15, 9)
+            ema21_m15 = self._calc_ema(closes_m15, 21)
+            ema50_m15 = self._calc_ema(closes_m15, 50) if len(closes_m15) >= 50 else ema21_m15
+            
+            if ema9_m15 > ema21_m15 > ema50_m15:
+                score += 15
+                reasons.append("Tren M15 Naik (EMA 9 > 21 > 50)")
+            elif ema9_m15 < ema21_m15 < ema50_m15:
+                score -= 15
+                reasons.append("Tren M15 Turun (EMA 9 < 21 < 50)")
+
+            st_m15 = self._calc_supertrend(candles_m15)
+            if st_m15 == "BULLISH":
+                score += 10
+            else:
+                score -= 10
+
+        # 3. Indikator M5 Setup (Bobot 40%)
+        rsi7_m5 = self._calc_rsi(closes_m5, 7)
+        if rsi7_m5 <= 28.0:
+            score += 20
+            reasons.append(f"RSI M5 Jenuh Jual ({rsi7_m5:.1f}) - Siap Membal")
+        elif rsi7_m5 >= 72.0:
+            score -= 20
+            reasons.append(f"RSI M5 Jenuh Beli ({rsi7_m5:.1f}) - Siap Koreksi")
+
+        # MACD Hist M5
+        macd_hist = self._calc_macd_hist(closes_m5)
+        if macd_hist > 0:
+            score += 10
+        else:
+            score -= 10
+
+        # Pin Bar M5
+        last_c = candles_m5[-1]
+        c_body = abs(last_c["close"] - last_c["open"])
+        c_range = max(0.1, last_c["high"] - last_c["low"])
+        lower_wick = min(last_c["open"], last_c["close"]) - last_c["low"]
+        upper_wick = last_c["high"] - max(last_c["open"], last_c["close"])
+
+        if lower_wick > c_body * 2.0 and lower_wick / c_range > 0.5:
+            score += 15
+            reasons.append("Penolakan Bawah M5 (Buyer Kuat)")
+        elif upper_wick > c_body * 2.0 and upper_wick / c_range > 0.5:
+            score -= 15
+            reasons.append("Penolakan Atas M5 (Seller Kuat)")
+
+        # 4. Indikator M1 Trigger (Bobot 30%)
+        if len(candles_m1) >= 15:
+            closes_m1 = [c["close"] for c in candles_m1]
+            st_m1 = self._calc_supertrend(candles_m1)
+            if st_m1 == "BULLISH":
+                score += 10
+            else:
+                score -= 10
+
+            ema9_m1 = self._calc_ema(closes_m1, 9)
+            if closes_m1[-1] > ema9_m1:
+                score += 5
+            else:
+                score -= 5
+
+        # Bound score -100 to 100
+        score = max(-100, min(100, score))
+        confidence = abs(score)
+
+        direction = "WAIT"
+        signal_type = "TUNGGU (WAIT)"
+
+        if is_wild:
+            signal_type = "PASAR LIAR (TUNGGU)"
+            direction = "WAIT"
+            reasons.insert(0, f"Volatilitas ATR ({atr_m5:.1f}) melebihi batas 160! Tahan saldo Anda.")
+        elif score >= CONFIDENCE_THRESHOLD:
             direction = "BUY"
-            reasons.append(f"RSI(7) Jenuh Jual ({rsi7:.1f}) Membal Naik")
-            reasons.append("Harga di atas EMA 9")
-        elif rsi7 >= 72.0 and cur_price < ema9:
+            signal_type = "BELI (BUY)"
+        elif score <= -CONFIDENCE_THRESHOLD:
             direction = "SELL"
-            reasons.append(f"RSI(7) Jenuh Beli ({rsi7:.1f}) Berbalik Turun")
-            reasons.append("Harga di bawah EMA 9")
+            signal_type = "JUAL (SELL)"
 
-        if not direction:
-            return
+        # Update latest analysis for Web Dashboard (SSOT)
+        self.latest_analysis = {
+            "status": "active",
+            "direction": direction,
+            "score": score,
+            "confidencePercent": confidence,
+            "signal": signal_type,
+            "atr_m5": round(atr_m5, 2),
+            "reasons": reasons if reasons else ["Menunggu konfluensi setup valid"],
+            "updated_at": int(time.time()),
+            "is_paused": self.is_paused,
+            "daily_pnl": round(self.daily_pnl_usd, 2),
+            "circuit_breaker": self.circuit_breaker_active,
+        }
 
-        # Eksekusi Order
-        self._execute_order(direction, cur_price, reasons, acc_info)
+        # Eksekusi Order Otomatis jika terkonfirmasi dan bot TIDAK DIJEDA
+        if direction in ["BUY", "SELL"]:
+            if self.is_paused:
+                logger.info(f"Sinyal {direction} terdeteksi ({confidence}%), tetapi BOT DIJEDA via Telegram (/stop). Order tidak dieksekusi.")
+                return
+            if self.circuit_breaker_active:
+                logger.info(f"Sinyal {direction} terdeteksi, tetapi Circuit Breaker aktif. Order ditahan.")
+                return
+            if time.time() - self.last_loss_time < COOLDOWN_SECONDS:
+                logger.info(f"Sinyal {direction} terdeteksi, tetapi dalam masa jeda cut loss. Order ditahan.")
+                return
+
+            cur_price = current_tick.get("ask" if direction == "BUY" else "bid", closes_m5[-1])
+            self._execute_order(direction, cur_price, reasons, acc_info)
 
     def _execute_order(self, direction: str, current_price: float, reasons: list, acc_info: dict):
         order_type = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL
@@ -403,7 +581,6 @@ class AureusSniperBot:
         sl_price = round(current_price - sl_dist if is_buy else current_price + sl_dist, 2)
         tp1_price = round(current_price + TARGET_TP1_POINTS if is_buy else current_price - TARGET_TP1_POINTS, 2)
 
-        # Filling mode detection
         sym_info = mt5.symbol_info(SYMBOL_TARGET)
         filling = mt5.ORDER_FILLING_IOC
         if sym_info:
@@ -437,7 +614,7 @@ class AureusSniperBot:
             self.pos_type = direction
 
             msg = (
-                f"🔔 <b>[ORDER BARU TERBUKA]</b>\n"
+                f"🔔 <b>[ORDER BARU TERBUKA (AUTO)]</b>\n"
                 f"────────────────────────\n"
                 f"Aksi     : <b>{direction} {SYMBOL_TARGET}</b>\n"
                 f"Volume   : <b>{FIXED_LOT} lot</b> (Fixed)\n"
@@ -445,9 +622,9 @@ class AureusSniperBot:
                 f"Batas SL : ${sl_price:,.2f} (-${sl_dist*0.01:.2f} USD)\n"
                 f"Target TP: ${tp1_price:,.2f} (+${TARGET_TP1_POINTS*0.01:.2f} USD)\n"
                 f"Alasan   : {' • '.join(reasons)}\n"
-                f"Saldo    : ${acc_info.get('balance', 24.26):.2f} USD\n"
+                f"Saldo    : ${acc_info.get('balance', 31.85):.2f} USD\n"
                 f"────────────────────────\n"
-                f"<i>Bot mengawal posisi dengan tangga profit 50% & 75%.</i>"
+                f"<i>Bot mengawal posisi 24/7 dengan tangga profit 50% & 75%.</i>"
             )
             self.telegram.send(msg)
             logger.info(f"Order {direction} sukses dieksekusi: Ticket #{res.order}")
@@ -483,6 +660,32 @@ class AureusSniperBot:
             ema = (val * k) + (ema * (1.0 - k))
         return ema
 
+    def _calc_macd_hist(self, closes: list) -> float:
+        if len(closes) < 26:
+            return 0.0
+        ema12 = self._calc_ema(closes, 12)
+        ema26 = self._calc_ema(closes, 26)
+        macd_line = ema12 - ema26
+        # Rough signal approximation
+        return macd_line
+
+    def _calc_supertrend(self, candles: list, period: int = 10, multiplier: float = 3.0) -> str:
+        if len(candles) < period + 1:
+            return "BULLISH"
+        closes = [c["close"] for c in candles]
+        highs = [c["high"] for c in candles]
+        lows = [c["low"] for c in candles]
+        
+        ranges = [max(h - l, abs(h - c_prev), abs(l - c_prev)) for h, l, c_prev in zip(highs[1:], lows[1:], closes[:-1])]
+        atr = sum(ranges[-period:]) / period if ranges else 50.0
+        hl2 = (highs[-1] + lows[-1]) / 2.0
+        upper = hl2 + (multiplier * atr)
+        lower = hl2 - (multiplier * atr)
+
+        if closes[-1] > lower:
+            return "BULLISH"
+        return "BEARISH"
+
     def get_status_text(self) -> str:
         pos = self._get_open_position()
         if pos:
@@ -509,14 +712,18 @@ class AureusSniperBot:
             )
         else:
             cb = "AKTIF (Istirahat)" if self.circuit_breaker_active else "SIAGA"
+            sign_td = "+" if self.daily_pnl_usd >= 0 else "-"
+            cur_signal = self.latest_analysis.get("signal", "TUNGGU (WAIT)")
+            conf = self.latest_analysis.get("confidencePercent", 0)
             return (
                 f"💤 <b>TIDAK ADA POSISI TERBUKA</b>\n"
                 f"────────────────────────\n"
-                f"Status Bot  : {'DIJEDA' if self.is_paused else 'AKTIF MEMINDAI'}\n"
+                f"Status Bot  : {'DIJEDA' if self.is_paused else 'AKTIF MEMINDAI (24/7)'}\n"
+                f"Sinyal Terkini : <b>{cur_signal}</b> (Keyakinan: {conf}%)\n"
                 f"Rem Harian  : {cb}\n"
-                f"PnL Hari Ini: ${self.daily_pnl_usd:.2f} USD\n"
+                f"PnL Bot Hari: {sign_td}${abs(self.daily_pnl_usd):.2f} USD\n"
                 f"Loss Seq    : {self.daily_consecutive_losses}/{MAX_CONSECUTIVE_LOSS}\n"
-                f"Pasar       : Menunggu konfluensi setup valid."
+                f"Pasar       : Menunggu konfluensi setup >= {CONFIDENCE_THRESHOLD}%."
             )
 
     def get_balance_text(self) -> str:

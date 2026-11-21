@@ -1,10 +1,15 @@
 """
 Aureus VPS Micro-Bridge & Autonomous Sniper Bot (Python)
-Runs on Windows VPS (109.111.52.163) alongside MetaTrader 5.
-Directly reads live balance and ticks from the active MT5 window.
-Integrated with:
-1. HTTP Micro-Bridge for Aureus Next.js Web Dashboard (Port 8000)
-2. Aureus AI Sniper Bot (Step-Ladder Ratchet 50% & 75%, Telegram Notifier, Circuit Breaker)
+Runs on Windows VPS alongside MetaTrader 5 (Exness Real).
+Features:
+1. HTTP Micro-Bridge (Port 8000) for Web Dashboard:
+   - /health
+   - /api/account
+   - /api/price
+   - /api/candles
+   - /api/analysis (SSOT Multi-Timeframe Signal & Confidence)
+   - /api/history  (Real MT5 Execution History & Deals)
+2. 24/7 Autonomous Multi-Timeframe Sniper Bot Engine
 """
 
 import sys
@@ -13,9 +18,11 @@ import json
 import logging
 import time
 import threading
+from datetime import datetime, timedelta
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from pathlib import Path
 
-# Set unbuffered output so print statements appear immediately
+# Unbuffered stdout
 sys.stdout.reconfigure(line_buffering=True)
 
 try:
@@ -33,7 +40,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("VPSBridge")
 
-PORT = 8000
+PORT = int(os.getenv("VPS_PORT", "8000"))
 
 # Import Sniper Bot Module
 try:
@@ -47,12 +54,12 @@ except ImportError:
         AureusSniperBot = None
         SNIPER_MODULE_AVAILABLE = False
 
-# Global cached state to guarantee 0ms response time
+# Global cached state
 LATEST_STATE = {
     "account": {
         "connected": False,
-        "balance": 24.26,
-        "equity": 24.26,
+        "balance": 31.85,
+        "equity": 31.85,
         "currency": "USD",
         "login": "268119731",
         "server": "Exness-MT5Real39",
@@ -65,18 +72,46 @@ LATEST_STATE = {
         "ask": 0.0,
         "last": 0.0,
         "spread": 0.0,
-        "error": "Menghubungkan ke MetaTrader 5..."
+        "time": 0
     },
-    "candles": []
+    "candles": [],
+    "analysis": {
+        "status": "standby",
+        "direction": "WAIT",
+        "score": 0,
+        "confidencePercent": 0,
+        "signal": "TUNGGU (WAIT)",
+        "atr_m5": 90.0,
+        "reasons": ["Menunggu terminal MT5 siap..."],
+        "updated_at": int(time.time()),
+        "is_paused": False,
+    },
+    "history": []
 }
 
+def rates_to_list(rates):
+    if rates is None or len(rates) == 0:
+        return []
+    res = []
+    for r in rates:
+        res.append({
+            "time": int(r['time']),
+            "open": round(float(r['open']), 2),
+            "high": round(float(r['high']), 2),
+            "low": round(float(r['low']), 2),
+            "close": round(float(r['close']), 2),
+            "volume": int(r['tick_volume'])
+        })
+    return res
+
 def mt5_worker_loop(sniper_bot=None):
-    """Background thread that reads active MT5 data and drives the sniper bot."""
+    """Background loop that drives MT5 updates and autonomous bot cycle."""
     global LATEST_STATE
-    logger.info("Worker MT5 dimulai. Membaca terminal MT5 yang sedang aktif...")
+    logger.info("Worker MT5 dimulai. Membaca terminal MT5...")
     
     mt5_initialized = False
     last_print_time = 0
+    last_history_fetch = 0
     
     while True:
         try:
@@ -100,12 +135,12 @@ def mt5_worker_loop(sniper_bot=None):
                     time.sleep(2)
                     continue
 
-            # 1. Baca langsung akun yang sedang login di jendela MT5 (Read-Only)
+            # 1. Update info akun
             acc = mt5.account_info()
             if acc:
                 d = acc._asdict()
-                bal = round(float(d.get("balance", 24.26)), 2)
-                eq = round(float(d.get("equity", 24.26)), 2)
+                bal = round(float(d.get("balance", 31.85)), 2)
+                eq = round(float(d.get("equity", 31.85)), 2)
                 cur = d.get("currency", "USD")
                 srv = d.get("server", "Exness-MT5Real39")
                 login_id = d.get("login")
@@ -118,15 +153,16 @@ def mt5_worker_loop(sniper_bot=None):
                     "equity": eq,
                     "currency": cur,
                     "leverage": d.get("leverage", 2000),
-                    "free_margin": round(float(d.get("margin_free", 24.26)), 2),
+                    "free_margin": round(float(d.get("margin_free", 31.85)), 2),
                     "company": d.get("company", "Exness Technologies Ltd")
                 }
             else:
                 LATEST_STATE["account"]["connected"] = False
                 LATEST_STATE["account"]["error"] = "Pastikan MT5 sudah terbuka dan login ke akun Exness."
 
-            # 2. Ambil data Tick real-time untuk BTCUSDm
-            for sym in ["BTCUSDm", "BTCUSD", "BTCUSDc", "BTCUSDT"]:
+            # 2. Update Tick
+            sym_target = os.getenv("SYMBOL_TARGET", "BTCUSDm")
+            for sym in [sym_target, "BTCUSD", "BTCUSDc", "BTCUSDT"]:
                 if mt5.symbol_select(sym, True):
                     tick = mt5.symbol_info_tick(sym)
                     if tick:
@@ -142,58 +178,83 @@ def mt5_worker_loop(sniper_bot=None):
                         }
                         break
 
-            # 3. Update Candles M5
-            sym = LATEST_STATE["tick"].get("symbol", "BTCUSDm")
-            rates = mt5.copy_rates_from_pos(sym, mt5.TIMEFRAME_M5, 0, 70)
-            if rates is not None and len(rates) > 0:
-                c_list = []
-                for r in rates:
-                    c_list.append({
-                        "time": int(r['time']),
-                        "open": round(float(r['open']), 2),
-                        "high": round(float(r['high']), 2),
-                        "low": round(float(r['low']), 2),
-                        "close": round(float(r['close']), 2),
-                        "volume": int(r['tick_volume'])
-                    })
-                LATEST_STATE["candles"] = c_list
+            # 3. Update Multi-Timeframe Candles (M1, M5, M15)
+            active_sym = LATEST_STATE["tick"].get("symbol", sym_target)
+            rates_m1 = mt5.copy_rates_from_pos(active_sym, mt5.TIMEFRAME_M1, 0, 50)
+            rates_m5 = mt5.copy_rates_from_pos(active_sym, mt5.TIMEFRAME_M5, 0, 70)
+            rates_m15 = mt5.copy_rates_from_pos(active_sym, mt5.TIMEFRAME_M15, 0, 50)
 
-            # 4. Jalankan Siklus Sniper Bot Otomatis (Anti-MC & Tangga Profit 50%-75%)
+            c_m1 = rates_to_list(rates_m1)
+            c_m5 = rates_to_list(rates_m5)
+            c_m15 = rates_to_list(rates_m15)
+            LATEST_STATE["candles"] = c_m5
+
+            # 4. Jalankan Siklus Otonom Sniper Bot (24/7)
             if sniper_bot and LATEST_STATE["account"].get("connected"):
                 try:
                     sniper_bot.run_cycle(
                         acc_info=LATEST_STATE["account"],
                         current_tick=LATEST_STATE["tick"],
-                        candles_m5=LATEST_STATE["candles"]
+                        candles_m1=c_m1,
+                        candles_m5=c_m5,
+                        candles_m15=c_m15
                     )
+                    LATEST_STATE["analysis"] = sniper_bot.latest_analysis
                 except Exception as bot_err:
                     logger.error(f"Error pada siklus Sniper Bot: {bot_err}")
 
-            # Cetak status live di layar setiap 5 detik
+            # 5. Sinkronisasi Deals History MT5 setiap 10 detik
             now = time.time()
-            if now - last_print_time >= 5:
+            if now - last_history_fetch >= 10:
+                last_history_fetch = now
+                try:
+                    dt_now = datetime.now()
+                    deals = mt5.history_deals_get(dt_now - timedelta(days=7), dt_now)
+                    if deals:
+                        hist_list = []
+                        # Ambil deal keluar (DEAL_ENTRY_OUT) atau deal selesai
+                        for d in reversed(deals[-40:]):
+                            d_dict = d._asdict()
+                            hist_list.append({
+                                "ticket": d_dict.get("ticket"),
+                                "order": d_dict.get("order"),
+                                "time": int(d_dict.get("time")),
+                                "symbol": d_dict.get("symbol"),
+                                "type": "BUY" if d_dict.get("type") == 0 else "SELL",
+                                "entry": "IN" if d_dict.get("entry") == 0 else "OUT",
+                                "volume": round(float(d_dict.get("volume", 0.01)), 2),
+                                "price": round(float(d_dict.get("price", 0.0)), 2),
+                                "profit": round(float(d_dict.get("profit", 0.0)), 2),
+                                "comment": d_dict.get("comment", ""),
+                                "magic": d_dict.get("magic", 0),
+                                "is_bot": (d_dict.get("magic") == int(os.getenv("MAGIC_NUMBER", "778898"))),
+                            })
+                        LATEST_STATE["history"] = hist_list
+                except Exception as hist_err:
+                    logger.warning(f"Error fetch history deals: {hist_err}")
+
+            # Cetak log setiap 10 detik
+            if now - last_print_time >= 10:
                 last_print_time = now
-                if LATEST_STATE["account"].get("connected"):
-                    acc_info = LATEST_STATE["account"]
-                    tick_info = LATEST_STATE["tick"]
-                    logger.info(
-                        f"[LIVE MT5] Login: #{acc_info['login']} | "
-                        f"Saldo: {acc_info['currency']} {acc_info['balance']} | "
-                        f"Equity: {acc_info['equity']} | "
-                        f"{tick_info.get('symbol')}: {tick_info.get('bid')} / {tick_info.get('ask')}"
-                    )
-                else:
-                    logger.info(f"[MENUNGGU MT5] {LATEST_STATE['account'].get('error')}")
+                acc_info = LATEST_STATE["account"]
+                tick_info = LATEST_STATE["tick"]
+                ana = LATEST_STATE["analysis"]
+                status_str = "DIJEDA" if ana.get("is_paused") else "AKTIF"
+                logger.info(
+                    f"[LIVE MT5] Saldo: ${acc_info.get('balance')} | "
+                    f"{tick_info.get('symbol')}: {tick_info.get('bid')} | "
+                    f"Bot: {status_str} | "
+                    f"Sinyal: {ana.get('signal')} ({ana.get('confidencePercent')}%)"
+                )
 
         except Exception as e:
-            logger.error(f"Error pada loop MT5: {e}")
+            logger.error(f"Error loop MT5: {e}")
             mt5_initialized = False
 
         time.sleep(1)
 
 class BalanceHandler(BaseHTTPRequestHandler):
     def address_string(self):
-        # Hindari DNS reverse lookup lambat
         return str(self.client_address[0])
 
     def log_message(self, format, *args):
@@ -209,7 +270,7 @@ class BalanceHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health" or self.path == "/":
-            self.send_json({"status": "online", "service": "Aureus MT5 VPS Bridge"})
+            self.send_json({"status": "online", "service": "Aureus 24/7 Autonomous MT5 Bridge"})
             return
 
         if self.path.startswith("/api/account") or self.path.startswith("/balance"):
@@ -220,11 +281,25 @@ class BalanceHandler(BaseHTTPRequestHandler):
             self.send_json(LATEST_STATE["tick"])
             return
 
-        if self.path.startswith("/api/exness/candles") or self.path.startswith("/api/candles"):
+        if self.path.startswith("/api/candles"):
             self.send_json({
                 "connected": LATEST_STATE["tick"].get("connected", False),
                 "symbol": LATEST_STATE["tick"].get("symbol", "BTCUSDm"),
                 "candles": LATEST_STATE["candles"]
+            })
+            return
+
+        if self.path.startswith("/api/analysis") or self.path.startswith("/api/bot/status"):
+            self.send_json({
+                "status": "success",
+                "analysis": LATEST_STATE["analysis"]
+            })
+            return
+
+        if self.path.startswith("/api/history") or self.path.startswith("/api/deals"):
+            self.send_json({
+                "status": "success",
+                "deals": LATEST_STATE["history"]
             })
             return
 
@@ -247,20 +322,19 @@ class ResilientServer(ThreadingHTTPServer):
 
 def run():
     print("=" * 60)
-    print("      AUREUS AI TRADER - MT5 LIVE EXNESS BRIDGE")
+    print("      AUREUS AI TRADER - AUTONOMOUS 24/7 MT5 BRIDGE")
     print("=" * 60)
     print(f"-> Port HTTP Bridge : {PORT}")
-    print(f"-> Mode Operasi     : Pure Read-Only + Autonomous Sniper Bot")
-    print(f"-> Proteksi Risiko  : Tangga Profit 50% & 75% + Rem Anti-MC")
-    print(f"-> Notifikasi       : Telegram @AureusAITraderBot")
+    print(f"-> Mode Operasi     : Autonomous 24/7 Multi-Timeframe Bot")
+    print(f"-> Tangga Profit    : +100pts (50%), +110pts (75%), +120pts (100%)")
+    print(f"-> Kendali Master   : Telegram Interactive Bot (/start, /stop)")
     print("=" * 60)
 
-    # Inisialisasi Sniper Bot
     sniper_bot = None
     if SNIPER_MODULE_AVAILABLE and AureusSniperBot:
         try:
             sniper_bot = AureusSniperBot()
-            logger.info("🤖 Aureus Sniper Bot aktif (Tangga Profit 50% & 75% + Notifikasi Telegram)")
+            logger.info("🤖 Aureus Autonomous Sniper Bot aktif.")
         except Exception as e:
             logger.warning(f"Gagal inisialisasi Sniper Bot: {e}")
 

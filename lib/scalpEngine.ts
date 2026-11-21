@@ -52,7 +52,7 @@ export function evaluateScalp(
   ratesM5: Candle[],
   ratesM15: Candle[],
   ratesH1: Candle[],
-  capital: number = 20.0
+  capital: number = 31.85
 ): ScalpSignal {
   const m1 = analyzeCandles(ratesM1);
   const m5 = analyzeCandles(ratesM5);
