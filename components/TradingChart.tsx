@@ -45,6 +45,16 @@ export default function TradingChart({ candles, signal, timeframe }: TradingChar
         borderColor: "#27272a",
         timeVisible: true,
         secondsVisible: false,
+        tickMarkFormatter: (time: number) => {
+          const date = new Date(time * 1000);
+          return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        },
+      },
+      localization: {
+        timeFormatter: (time: number) => {
+          const date = new Date(time * 1000);
+          return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        },
       },
     });
 

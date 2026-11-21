@@ -53,7 +53,7 @@ export default function DashboardPage() {
 
   const [livePrice, setLivePrice] = useState<number>(60000);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
-  const [countdown, setCountdown] = useState<number>(15);
+  const [countdown, setCountdown] = useState<number>(5);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   // Settings
@@ -260,7 +260,7 @@ export default function DashboardPage() {
         if (prev <= 1) {
           runAnalysis();
           loadCandles(timeframe);
-          return 15;
+          return 5;
         }
         return prev - 1;
       });
@@ -361,7 +361,7 @@ export default function DashboardPage() {
               onClick={() => {
                 runAnalysis();
                 loadCandles(timeframe);
-                setCountdown(15);
+                setCountdown(5);
                 showToast("Data pasar diperbarui!");
               }}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 text-zinc-400 border border-zinc-800/80 text-xs transition active:scale-95"
