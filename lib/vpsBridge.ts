@@ -25,7 +25,7 @@ export async function fetchVpsAccount(customVpsUrl?: string): Promise<VpsAccount
 
     const res = await fetch(`${vpsUrl}/api/account`, {
       signal: controller.signal,
-      next: { revalidate: 3 },
+      cache: "no-store",
     });
 
     clearTimeout(timeout);

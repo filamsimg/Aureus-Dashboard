@@ -100,7 +100,7 @@ export default function ScalpCard({
             </div>
             <ul className="list-disc list-inside space-y-2 text-zinc-300 text-xs sm:text-sm leading-relaxed">
               <li>
-                <strong className="text-zinc-100">Aturan Modal $20:</strong> Akun modal kecil tidak boleh entry saat jarak batas rugi (SL) lebih dari 130 poin.
+                <strong className="text-zinc-100">Proteksi Saldo Akun:</strong> Akun modal mikro tidak boleh entry saat jarak batas rugi (SL) lebih dari 130 poin.
               </li>
               <li>
                 <strong className="text-zinc-100">Syarat Keyakinan:</strong> Sistem hanya memicu instruksi <strong>BELI</strong> atau <strong>JUAL</strong> jika tingkat keyakinan mencapai minimal <strong>55%</strong>.
@@ -193,7 +193,7 @@ export default function ScalpCard({
         <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-900/80 border border-zinc-800/70">
           <div>
             <span className="text-xs uppercase font-bold text-zinc-400 block mb-0.5">1. Lot / Volume Trading</span>
-            <span className="font-black text-base sm:text-lg text-amber-300">0.01 lot (Wajib modal $20)</span>
+            <span className="font-black text-base sm:text-lg text-amber-300">0.01 lot (Aman & Terukur)</span>
           </div>
           <span className="text-xs font-bold text-zinc-400 bg-zinc-800 px-2.5 py-1 rounded-md">Fixed</span>
         </div>

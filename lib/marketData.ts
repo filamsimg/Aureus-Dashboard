@@ -38,7 +38,7 @@ export async function fetchLiveTicker(): Promise<{
     const timeout = setTimeout(() => controller.abort(), 1200); // 1.2s fast check
     const vpsRes = await fetch(`${vpsUrl}/api/price`, {
       signal: controller.signal,
-      next: { revalidate: 1 },
+      cache: "no-store",
     });
     clearTimeout(timeout);
 
@@ -134,7 +134,7 @@ export async function fetchCandles(timeframe: string = "M5", limit: number = 60)
     const timeout = setTimeout(() => controller.abort(), 1500); // 1.5s fast check
     const vpsRes = await fetch(`${vpsUrl}/api/candles?tf=${tf}&limit=${limit}`, {
       signal: controller.signal,
-      next: { revalidate: 2 },
+      cache: "no-store",
     });
     clearTimeout(timeout);
 

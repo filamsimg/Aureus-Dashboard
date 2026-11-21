@@ -16,7 +16,7 @@ export default function RiskCard({ risk }: RiskCardProps) {
       <div className="flex items-center justify-between pb-3 mb-3 border-b border-zinc-800/70">
         <span className="font-extrabold text-zinc-100 text-sm sm:text-base flex items-center gap-2">
           <ShieldCheck className="w-5 h-5 text-emerald-400" />
-          Kalkulator Risiko ($20 Real Standard)
+          Kalkulator Risiko (${risk.capital ? `$${risk.capital.toFixed(2)}` : "$24.26"} Exness Real)
         </span>
         <span
           className={`px-3 py-1 rounded-full text-xs font-black tracking-wide ${

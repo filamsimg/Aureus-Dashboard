@@ -116,7 +116,9 @@ export default function DashboardPage() {
 
   const fetchAccount = useCallback(async () => {
     try {
-      const res = await fetch(`/api/account?vps_url=${encodeURIComponent(vpsUrl)}`);
+      const res = await fetch(`/api/account?vps_url=${encodeURIComponent(vpsUrl)}&_t=${Date.now()}`, {
+        cache: "no-store",
+      });
       const data = await res.json();
       if (data.status === "success" && data.account) {
         setAccountBalance(data.account.balance);
@@ -260,6 +262,7 @@ export default function DashboardPage() {
         if (prev <= 1) {
           runAnalysis();
           loadCandles(timeframe);
+          fetchAccount();
           return 5;
         }
         return prev - 1;
@@ -413,7 +416,7 @@ export default function DashboardPage() {
             </span>
           </div>
           <div className="text-xs text-zinc-300 bg-zinc-900 px-3 py-1 rounded-full border border-zinc-800 font-bold">
-            Exness BTCUSD • Modal $20
+            Exness BTCUSD • Saldo ${accountBalance.toFixed(2)} {accountCurrency}
           </div>
         </div>
 

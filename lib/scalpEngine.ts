@@ -129,7 +129,7 @@ export function evaluateScalp(
   if (isVolatilityTooHigh) {
     signalType = "PASAR LIAR (TUNGGU)";
     direction = "WAIT";
-    reasons.unshift("⚠️ Gerakan candle terlalu panjang! Tahan saldo $20 Anda sampai pasar tenang.");
+    reasons.unshift(`⚠️ Gerakan candle terlalu panjang! Tahan saldo $${capital.toFixed(2)} Anda sampai pasar tenang.`);
   } else if (score >= 55) {
     signalType = "BELI (BUY)";
     direction = "BUY";
@@ -175,7 +175,7 @@ export function evaluateScalp(
 
   if (isVolatilityTooHigh) {
     safety = "PASAR LIAR (DITOLAK)";
-    advice = "Volatilitas BTC saat ini melebihi batas aman modal $20. Jangan buka order sekarang.";
+    advice = `Volatilitas BTC saat ini melebihi batas aman modal $${capital.toFixed(2)}. Jangan buka order sekarang.`;
   } else if (maxLossPct > 7.0) {
     safety = "PERHATIAN";
     advice = `Batas rugi -$${maxLossUsd} (${maxLossPct}% saldo). Wajib cut loss jika menyentuh SL!`;
@@ -211,7 +211,7 @@ export function evaluateScalp(
         `3. Masukkan Batas Rugi (SL): $${slPrice} (Maksimal rugi -$${maxLossUsd}).\n` +
         `4. Masukkan Target Untung (TP1): $${tp1Price} (Untung +$${profitTp1}).\n` +
         `5. PENTING: Saat TP1 tersentuh, segera ubah SL ke harga beli ($${entryPrice}) agar bebas risiko!`
-      : "Tahan dulu modal $20 Anda. Jangan buru-buru masuk saat pasar belum memberi konfirmasi.";
+      : `Tahan dulu modal $${capital.toFixed(2)} Anda. Jangan buru-buru masuk saat pasar belum memberi konfirmasi.`;
 
   return {
     signal: signalType,
