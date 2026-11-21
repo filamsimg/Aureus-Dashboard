@@ -21,6 +21,7 @@ export interface TradeEntry {
   exitPrice?: number | null;
   pnlUsd: number;
   notes?: string;
+  source?: "BOT" | "MANUAL";
 }
 
 export interface JournalStats {
@@ -30,6 +31,23 @@ export interface JournalStats {
   winRatePercent: number;
   totalPnlUsd: number;
   profitFactor: number;
+
+  // Breakdown Bot vs Manual
+  botPnlUsd: number;
+  botWins: number;
+  botLosses: number;
+  botWinRatePercent: number;
+
+  manualPnlUsd: number;
+  manualWins: number;
+  manualLosses: number;
+  manualWinRatePercent: number;
+
+  // Breakdown Waktu
+  todayPnlUsd: number;
+  todayTradesCount: number;
+  weeklyPnlUsd: number;
+  weeklyTradesCount: number;
 }
 
 // In-memory fallback storage
@@ -180,6 +198,28 @@ export async function getJournalStats(): Promise<JournalStats> {
   const winRatePercent = totalTrades > 0 ? Number(((wins / totalTrades) * 100).toFixed(1)) : 0;
   const profitFactor = grossLoss > 0 ? Number((grossProfit / grossLoss).toFixed(2)) : grossProfit > 0 ? grossProfit : 1.0;
 
+  const botTrades = trades.filter((t) => t.source === "BOT" || t.notes?.includes("Aureus"));
+  const botWins = botTrades.filter((t) => (t.pnlUsd || 0) > 0).length;
+  const botLosses = botTrades.filter((t) => (t.pnlUsd || 0) < 0).length;
+  const botPnlUsd = Number(botTrades.reduce((acc, t) => acc + (t.pnlUsd || 0), 0).toFixed(2));
+  const botWinRatePercent = botTrades.length > 0 ? Number(((botWins / botTrades.length) * 100).toFixed(1)) : 0;
+
+  const manualTrades = trades.filter((t) => t.source === "MANUAL" || (!t.source && !t.notes?.includes("Aureus")));
+  const manualWins = manualTrades.filter((t) => (t.pnlUsd || 0) > 0).length;
+  const manualLosses = manualTrades.filter((t) => (t.pnlUsd || 0) < 0).length;
+  const manualPnlUsd = Number(manualTrades.reduce((acc, t) => acc + (t.pnlUsd || 0), 0).toFixed(2));
+  const manualWinRatePercent = manualTrades.length > 0 ? Number(((manualWins / manualTrades.length) * 100).toFixed(1)) : 0;
+
+  const now = new Date();
+  const startOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).getTime();
+  const sevenDaysAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+
+  const todayTrades = trades.filter((t) => new Date(t.openedAt).getTime() >= startOfToday);
+  const todayPnlUsd = Number(todayTrades.reduce((acc, t) => acc + (t.pnlUsd || 0), 0).toFixed(2));
+
+  const weeklyTrades = trades.filter((t) => new Date(t.openedAt).getTime() >= sevenDaysAgo);
+  const weeklyPnlUsd = Number(weeklyTrades.reduce((acc, t) => acc + (t.pnlUsd || 0), 0).toFixed(2));
+
   return {
     totalTrades,
     wins,
@@ -187,5 +227,17 @@ export async function getJournalStats(): Promise<JournalStats> {
     winRatePercent,
     totalPnlUsd: Number(totalPnl.toFixed(2)),
     profitFactor,
+    botPnlUsd,
+    botWins,
+    botLosses,
+    botWinRatePercent,
+    manualPnlUsd,
+    manualWins,
+    manualLosses,
+    manualWinRatePercent,
+    todayPnlUsd,
+    todayTradesCount: todayTrades.length,
+    weeklyPnlUsd,
+    weeklyTradesCount: weeklyTrades.length,
   };
 }

@@ -29,6 +29,7 @@ export async function GET() {
               else if (isLoss) status = "SL_HIT";
               else status = "CLOSED_MANUAL";
 
+              const isBot = Boolean(d.is_bot);
               return {
                 id: d.ticket,
                 openedAt: new Date(d.time * 1000).toISOString(),
@@ -41,7 +42,8 @@ export async function GET() {
                 status,
                 exitPrice: d.price,
                 pnlUsd: d.profit,
-                notes: d.is_bot
+                source: isBot ? "BOT" : "MANUAL",
+                notes: isBot
                   ? "🤖 Aureus Sniper Bot (Magic #778898)"
                   : d.comment
                   ? `👤 Manual MT5 Trade (${d.comment})`
@@ -57,6 +59,30 @@ export async function GET() {
             const grossProfit = closed.filter((t) => t.pnlUsd > 0).reduce((acc, t) => acc + t.pnlUsd, 0);
             const grossLoss = Math.abs(closed.filter((t) => t.pnlUsd < 0).reduce((acc, t) => acc + t.pnlUsd, 0));
 
+            // Breakdown Bot vs Manual
+            const botTrades = closed.filter((t) => t.source === "BOT");
+            const botWins = botTrades.filter((t) => t.pnlUsd > 0).length;
+            const botLosses = botTrades.filter((t) => t.pnlUsd < 0).length;
+            const botPnlUsd = Number(botTrades.reduce((acc, t) => acc + t.pnlUsd, 0).toFixed(2));
+            const botWinRatePercent = botTrades.length > 0 ? Number(((botWins / botTrades.length) * 100).toFixed(1)) : 0;
+
+            const manualTrades = closed.filter((t) => t.source === "MANUAL");
+            const manualWins = manualTrades.filter((t) => t.pnlUsd > 0).length;
+            const manualLosses = manualTrades.filter((t) => t.pnlUsd < 0).length;
+            const manualPnlUsd = Number(manualTrades.reduce((acc, t) => acc + t.pnlUsd, 0).toFixed(2));
+            const manualWinRatePercent = manualTrades.length > 0 ? Number(((manualWins / manualTrades.length) * 100).toFixed(1)) : 0;
+
+            // Breakdown Waktu: Hari Ini & 7 Hari Terakhir
+            const now = new Date();
+            const startOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).getTime();
+            const sevenDaysAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+
+            const todayTrades = closed.filter((t) => new Date(t.openedAt).getTime() >= startOfToday);
+            const todayPnlUsd = Number(todayTrades.reduce((acc, t) => acc + t.pnlUsd, 0).toFixed(2));
+
+            const weeklyTrades = closed.filter((t) => new Date(t.openedAt).getTime() >= sevenDaysAgo);
+            const weeklyPnlUsd = Number(weeklyTrades.reduce((acc, t) => acc + t.pnlUsd, 0).toFixed(2));
+
             const stats: JournalStats = {
               totalTrades: closed.length,
               wins,
@@ -64,6 +90,18 @@ export async function GET() {
               winRatePercent: closed.length > 0 ? Number(((wins / closed.length) * 100).toFixed(1)) : 0,
               totalPnlUsd: Number(totalPnl.toFixed(2)),
               profitFactor: grossLoss > 0 ? Number((grossProfit / grossLoss).toFixed(2)) : grossProfit > 0 ? 99.0 : 1.0,
+              botPnlUsd,
+              botWins,
+              botLosses,
+              botWinRatePercent,
+              manualPnlUsd,
+              manualWins,
+              manualLosses,
+              manualWinRatePercent,
+              todayPnlUsd,
+              todayTradesCount: todayTrades.length,
+              weeklyPnlUsd,
+              weeklyTradesCount: weeklyTrades.length,
             };
 
             return NextResponse.json({

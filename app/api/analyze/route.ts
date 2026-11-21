@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchCandles } from "@/lib/marketData";
 import { evaluateScalp, ScalpSignal, RiskProfile } from "@/lib/scalpEngine";
+import { analyzeCandles } from "@/lib/indicators";
 
 export const dynamic = "force-dynamic";
 
@@ -34,9 +35,14 @@ export async function GET(req: NextRequest) {
           const vpsData = await vpsRes.json();
           const ana = vpsData?.analysis;
           if (ana && ana.status === "active") {
-            // Fetch M5 candles for chart price reference
-            const m5Candles = await fetchCandles("M5", 10);
-            const currentPrice = m5Candles[m5Candles.length - 1]?.close || 60000;
+            // Fetch candles for chart price reference and Multi-Timeframe Matrix calculation
+            const [cM1, cM5, cM15, cH1] = await Promise.all([
+              fetchCandles("M1", 50),
+              fetchCandles("M5", 50),
+              fetchCandles("M15", 50),
+              fetchCandles("H1", 50),
+            ]);
+            const currentPrice = cM5[cM5.length - 1]?.close || 60000;
             const slDist = 80.0;
             const tp1Dist = 120.0;
             const tp2Dist = 200.0;
@@ -82,7 +88,12 @@ export async function GET(req: NextRequest) {
               rrTp1: "1:1.5",
               rrTp2: "1:2.5",
               risk,
-              indicators: { m1: null, m5: null, m15: null, h1: null },
+              indicators: {
+                m1: analyzeCandles(cM1),
+                m5: analyzeCandles(cM5),
+                m15: analyzeCandles(cM15),
+                h1: analyzeCandles(cH1),
+              },
               reasons: ana.reasons || [],
               invalidation: `Cut loss terukur di $${slPrice.toFixed(2)} (-$0.80 USD)`,
               actionGuide: ana.is_paused

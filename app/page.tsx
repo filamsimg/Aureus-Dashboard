@@ -38,6 +38,18 @@ export default function DashboardPage() {
     winRatePercent: 0,
     totalPnlUsd: 0,
     profitFactor: 1.0,
+    botPnlUsd: 0,
+    botWins: 0,
+    botLosses: 0,
+    botWinRatePercent: 0,
+    manualPnlUsd: 0,
+    manualWins: 0,
+    manualLosses: 0,
+    manualWinRatePercent: 0,
+    todayPnlUsd: 0,
+    todayTradesCount: 0,
+    weeklyPnlUsd: 0,
+    weeklyTradesCount: 0,
   });
 
   const [livePrice, setLivePrice] = useState<number>(60000);
