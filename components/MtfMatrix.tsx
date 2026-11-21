@@ -19,7 +19,7 @@ export default function MtfMatrix({ indicators }: MtfMatrixProps) {
   const renderCol = (tf: string, label: string, data: TechnicalSnapshot | null) => {
     if (!data) {
       return (
-        <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-800/60 text-xs text-zinc-500">
+        <div className="bg-zinc-900/80 p-3 rounded-xl border border-zinc-800/70 text-xs sm:text-sm text-zinc-500">
           {tf} Memuat...
         </div>
       );
@@ -29,25 +29,25 @@ export default function MtfMatrix({ indicators }: MtfMatrixProps) {
     const trendText = isBull ? "Naik (Bull)" : "Turun (Bear)";
 
     return (
-      <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-800/60 text-xs">
-        <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-zinc-800/60">
-          <span className="font-bold text-zinc-100">{tf}</span>
-          <span className="text-[10px] text-zinc-400 uppercase tracking-wider">{label}</span>
+      <div className="bg-zinc-900/80 p-3 rounded-xl border border-zinc-800/70 text-xs sm:text-sm">
+        <div className="flex items-center justify-between pb-2 mb-2 border-b border-zinc-800/70">
+          <span className="font-extrabold text-sm sm:text-base text-zinc-100">{tf}</span>
+          <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">{label}</span>
         </div>
-        <div className="space-y-1 text-zinc-400">
+        <div className="space-y-1.5 text-zinc-300">
           <div className="flex justify-between items-center">
-            <span>Tren:</span>
-            <span className={`font-semibold ${isBull ? "text-emerald-400" : "text-rose-400"}`}>
+            <span className="text-zinc-400">Tren:</span>
+            <span className={`font-bold ${isBull ? "text-emerald-400" : "text-rose-400"}`}>
               {trendText}
             </span>
           </div>
           <div className="flex justify-between items-center">
-            <span>RSI:</span>
-            <span className="text-zinc-200 font-bold tabular-nums">{data.rsi7 || data.rsi14}</span>
+            <span className="text-zinc-400">RSI:</span>
+            <span className="text-zinc-100 font-extrabold tabular-nums">{data.rsi7 || data.rsi14}</span>
           </div>
           <div className="flex justify-between items-center">
-            <span>EMA 9:</span>
-            <span className="text-zinc-300 tabular-nums">${data.ema9 || data.ema50}</span>
+            <span className="text-zinc-400">EMA 9:</span>
+            <span className="text-zinc-200 font-bold tabular-nums">${data.ema9 || data.ema50}</span>
           </div>
         </div>
       </div>
@@ -55,16 +55,16 @@ export default function MtfMatrix({ indicators }: MtfMatrixProps) {
   };
 
   return (
-    <div className="bg-[#121215] border border-zinc-800/80 rounded-2xl p-4 shadow-sm text-xs">
-      <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-zinc-800/60">
-        <span className="font-semibold text-zinc-300 flex items-center gap-1.5">
-          <Layers className="w-4 h-4 text-zinc-400" />
-          Matrix Multi-Timeframe (Konfluensi Arah)
+    <div className="bg-[#121215] border border-zinc-800/80 rounded-2xl p-5 shadow-sm text-sm">
+      <div className="flex items-center justify-between pb-3 mb-3 border-b border-zinc-800/70">
+        <span className="font-extrabold text-zinc-100 text-sm sm:text-base flex items-center gap-2">
+          <Layers className="w-5 h-5 text-zinc-400" />
+          Matrix Multi-Timeframe (Konfluensi Arah Sinyal)
         </span>
-        <span className="text-[11px] text-zinc-500">M1 • M5 • M15 • H1</span>
+        <span className="text-xs font-semibold text-zinc-400">M1 • M5 • M15 • H1</span>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {renderCol("M1", "Trigger", m1)}
         {renderCol("M5", "Scalp Utama", m5)}
         {renderCol("M15", "Struktur", m15)}

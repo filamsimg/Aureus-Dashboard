@@ -271,49 +271,49 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#09090b] text-zinc-100 antialiased">
-      {/* Sleek Minimalist Top Navbar */}
-      <header className="bg-[#121215]/90 backdrop-blur-md border-b border-zinc-800/80 sticky top-0 z-40 px-4 py-3">
+      {/* Sleek Modern Top Navbar */}
+      <header className="bg-[#121215]/95 backdrop-blur-md border-b border-zinc-800/80 sticky top-0 z-40 px-4 sm:px-6 py-3.5">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
           {/* Brand & Market Price */}
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center font-bold text-xs text-emerald-400">
+          <div className="flex items-center gap-3.5">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center font-black text-sm text-emerald-400">
                 AU
               </div>
-              <span className="font-bold text-sm tracking-tight text-zinc-100">
+              <span className="font-extrabold text-base tracking-tight text-zinc-100">
                 AUREUS SCALPER
               </span>
             </div>
-            <span className="text-zinc-700">/</span>
-            <div className="flex items-baseline gap-1.5 text-xs">
-              <span className="text-zinc-400 font-medium">BTC/USD</span>
-              <span className="font-bold text-emerald-400 tabular-nums">
+            <span className="text-zinc-700 font-bold">/</span>
+            <div className="flex items-baseline gap-2 text-sm sm:text-base">
+              <span className="text-zinc-400 font-semibold">BTC/USD</span>
+              <span className="font-black text-emerald-400 tabular-nums tracking-tight">
                 ${livePrice.toLocaleString("en-US", { minimumFractionDigits: 2 })}
               </span>
             </div>
           </div>
 
           {/* Center: MT5 Balance & Token-Saving Toggle */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             {/* Real Balance from VPS MT5 / Smart Ledger */}
             <div
-              className="flex items-center gap-2 bg-zinc-900/90 border border-zinc-800/80 rounded-xl px-3 py-1.5 text-xs"
-              title={`Akun: #${accountLogin} (${vpsConnected ? "VPS MT5 Terhubung (Live)" : "Smart Ledger Mode (Jalankan PASANG_DI_VPS.bat untuk saldo live)"})`}
+              className="flex items-center gap-2.5 bg-zinc-900/90 border border-zinc-800/80 rounded-xl px-3.5 py-2 text-xs sm:text-sm"
+              title={`Akun: #${accountLogin} (${vpsConnected ? "VPS MT5 Terhubung (Live)" : "Smart Ledger Mode"})`}
             >
               <span
-                className={`w-2 h-2 rounded-full ${
-                  vpsConnected ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.7)]" : "bg-amber-400"
+                className={`w-2.5 h-2.5 rounded-full ${
+                  vpsConnected ? "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.8)]" : "bg-amber-400"
                 }`}
               ></span>
-              <span className="text-zinc-400 text-[11px] font-medium">MT5 #{accountLogin}:</span>
-              <strong className="text-zinc-100 font-bold tabular-nums">
+              <span className="text-zinc-400 font-medium">MT5 #{accountLogin}:</span>
+              <strong className="text-zinc-100 font-black tabular-nums text-sm sm:text-base">
                 ${accountBalance.toFixed(2)} {accountCurrency}
               </strong>
               <span
-                className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                className={`text-xs font-bold px-2 py-0.5 rounded-full ${
                   vpsConnected
-                    ? "text-emerald-400 bg-emerald-500/15 border border-emerald-500/20"
-                    : "text-amber-400 bg-amber-500/15 border border-amber-500/20"
+                    ? "text-emerald-300 bg-emerald-500/20 border border-emerald-500/30"
+                    : "text-amber-300 bg-amber-500/20 border border-amber-500/30"
                 }`}
               >
                 {vpsConnected ? "LIVE" : "ESTIMASI"}
@@ -331,26 +331,26 @@ export default function DashboardPage() {
                     : "Mode Standby Aktif: API AI tidur (Hemat Token 100%)"
                 );
               }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition active:scale-95 ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold border transition active:scale-95 ${
                 tradingMode === "active"
-                  ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20"
+                  ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30"
                   : "bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-zinc-200"
               }`}
             >
-              <Power className="w-3.5 h-3.5" />
+              <Power className="w-4 h-4" />
               <span>{tradingMode === "active" ? "Trading Aktif" : "Standby (Hemat)"}</span>
             </button>
           </div>
 
           {/* Right Controls */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             {/* Audio Toggle */}
             <button
               onClick={() => {
                 setSoundEnabled(!soundEnabled);
                 showToast(soundEnabled ? "Suara alarm dimatikan" : "Suara alarm aktif 🔔");
               }}
-              className="p-2 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 text-zinc-400 border border-zinc-800/80 transition active:scale-95"
+              className="p-2.5 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border border-zinc-800/80 transition active:scale-95"
               title="Toggle Suara"
             >
               {soundEnabled ? <Volume2 className="w-4 h-4 text-zinc-200" /> : <VolumeX className="w-4 h-4 text-zinc-600" />}
@@ -364,17 +364,17 @@ export default function DashboardPage() {
                 setCountdown(5);
                 showToast("Data pasar diperbarui!");
               }}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 text-zinc-400 border border-zinc-800/80 text-xs transition active:scale-95"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border border-zinc-800/80 text-xs sm:text-sm font-semibold transition active:scale-95"
               title="Klik untuk Refresh sekarang"
             >
-              <RefreshCw className="w-3.5 h-3.5 text-zinc-500" />
-              <span className="text-zinc-400 tabular-nums">{countdown}s</span>
+              <RefreshCw className="w-4 h-4 text-zinc-400" />
+              <span className="text-zinc-300 tabular-nums">{countdown}s</span>
             </button>
 
             {/* Settings Modal Button */}
             <button
               onClick={() => setIsSettingsOpen(true)}
-              className="p-2 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 text-zinc-400 border border-zinc-800/80 transition active:scale-95"
+              className="p-2.5 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border border-zinc-800/80 transition active:scale-95"
               title="Pengaturan"
             >
               <Settings className="w-4 h-4 text-zinc-300" />
@@ -385,61 +385,61 @@ export default function DashboardPage() {
 
       {/* Toast Notification */}
       {toastMsg && (
-        <div className="fixed bottom-6 right-6 z-50 bg-zinc-900/95 border border-zinc-700/80 text-zinc-100 text-xs font-medium px-4 py-2.5 rounded-2xl shadow-xl flex items-center gap-2 transition animate-bounce">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+        <div className="fixed bottom-6 right-6 z-50 bg-zinc-900/95 border border-zinc-700/80 text-zinc-100 text-sm font-semibold px-4 py-3 rounded-2xl shadow-xl flex items-center gap-2.5 transition animate-bounce">
+          <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />
           <span>{toastMsg}</span>
         </div>
       )}
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-5 space-y-4">
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-4 sm:space-y-5">
         {/* Simple Workflow Guide Bar */}
-        <div className="bg-[#121215] border border-zinc-800/80 rounded-2xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div className="bg-[#121215] border border-zinc-800/80 rounded-2xl px-5 py-3 flex flex-wrap items-center justify-between gap-3 text-xs sm:text-sm">
           <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-            <span className="font-bold text-zinc-200 flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
+            <span className="font-extrabold text-zinc-100 flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-cyan-400"></span>
               Alur Scalping:
             </span>
-            <span className="text-zinc-400">
-              <strong className="text-zinc-300">1. Pantau Status</strong> (Kuning = Tahan Saldo • Hijau = Beli • Merah = Jual)
+            <span className="text-zinc-300 font-medium">
+              <strong className="text-zinc-100">1. Pantau Status</strong> (Kuning = Tahan Saldo • Hijau = Beli • Merah = Jual)
             </span>
             <span className="text-zinc-600 hidden sm:inline">•</span>
-            <span className="text-zinc-400">
-              <strong className="text-zinc-300">2. Salin Parameter</strong> (Lot 0.01, SL, TP1)
+            <span className="text-zinc-300 font-medium">
+              <strong className="text-zinc-100">2. Salin Parameter</strong> (Lot 0.01, SL, TP1)
             </span>
             <span className="text-zinc-600 hidden sm:inline">•</span>
-            <span className="text-zinc-400">
-              <strong className="text-zinc-300">3. Eksekusi di MT5</strong>
+            <span className="text-zinc-300 font-medium">
+              <strong className="text-zinc-100">3. Eksekusi di MT5</strong>
             </span>
           </div>
-          <div className="text-[11px] text-zinc-400 bg-zinc-900 px-2 py-0.5 rounded-full border border-zinc-800 font-medium">
+          <div className="text-xs text-zinc-300 bg-zinc-900 px-3 py-1 rounded-full border border-zinc-800 font-bold">
             Exness BTCUSD • Modal $20
           </div>
         </div>
 
         {/* Row 1: Chart & Scalp Signal Card */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
           {/* Candlestick Chart (7 Cols) */}
-          <div className="lg:col-span-7 bg-[#121215] border border-zinc-800/80 rounded-2xl p-4 shadow-sm flex flex-col justify-between">
-            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-zinc-300">Grafik Candlestick Real-time</span>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full border ${
+          <div className="lg:col-span-7 bg-[#121215] border border-zinc-800/80 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2.5 mb-3.5">
+              <div className="flex items-center gap-2.5">
+                <span className="text-sm sm:text-base font-extrabold text-zinc-100">Grafik Candlestick Real-time</span>
+                <span className={`text-xs px-2.5 py-1 rounded-full border font-bold ${
                   vpsConnected 
-                    ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20 font-medium" 
-                    : "text-zinc-500 bg-zinc-900 border-zinc-800"
+                    ? "text-emerald-300 bg-emerald-500/15 border-emerald-500/30" 
+                    : "text-zinc-400 bg-zinc-900 border-zinc-800"
                 }`}>
                   {vpsConnected ? "Exness MT5 Live (100% Akurat)" : "Public Standby Feed"}
                 </span>
               </div>
 
               {/* Timeframe Switcher */}
-              <div className="flex items-center gap-1 bg-zinc-900/80 p-1 rounded-xl border border-zinc-800/80 text-xs">
+              <div className="flex items-center gap-1.5 bg-zinc-900/80 p-1 rounded-xl border border-zinc-800/80 text-xs sm:text-sm">
                 {["M1", "M5", "M15", "H1"].map((tf) => (
                   <button
                     key={tf}
                     onClick={() => setTimeframe(tf)}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
+                    className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition ${
                       timeframe === tf
                         ? "bg-zinc-800 text-emerald-400 shadow-xs"
                         : "text-zinc-400 hover:text-zinc-200"
@@ -452,13 +452,13 @@ export default function DashboardPage() {
             </div>
 
             {/* TradingView Lightweight Chart */}
-            <div className="min-h-[340px] w-full rounded-xl overflow-hidden border border-zinc-800/50">
+            <div className="min-h-[460px] w-full rounded-xl overflow-hidden border border-zinc-800/60 bg-[#121214]">
               <TradingChart candles={candles} signal={signal} timeframe={timeframe} />
             </div>
 
-            <div className="flex items-center justify-between pt-2.5 mt-2 border-t border-zinc-800/60 text-[11px] text-zinc-500">
+            <div className="flex items-center justify-between pt-3 mt-2.5 border-t border-zinc-800/70 text-xs text-zinc-400 font-medium">
               <span>Garis Putus-putus: Hijau = Target TP • Merah = Batas SL</span>
-              <span className="text-zinc-400">Timeframe: {timeframe}</span>
+              <span className="text-zinc-300 font-semibold">Timeframe: {timeframe}</span>
             </div>
           </div>
 

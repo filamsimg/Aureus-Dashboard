@@ -11,7 +11,7 @@ interface TradingChartProps {
   timeframe: string;
 }
 
-export default function TradingChart({ candles, signal, timeframe }: TradingChartProps) {
+export default function TradingChart({ candles, signal }: TradingChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -26,10 +26,11 @@ export default function TradingChart({ candles, signal, timeframe }: TradingChar
 
     const chart = createChart(chartContainerRef.current, {
       width: chartContainerRef.current.clientWidth,
-      height: 420,
+      height: 460,
       layout: {
         background: { color: "#121214" },
-        textColor: "#71717a",
+        textColor: "#a1a1aa",
+        fontSize: 12,
       },
       grid: {
         vertLines: { color: "#1e1e24" },
@@ -40,6 +41,10 @@ export default function TradingChart({ candles, signal, timeframe }: TradingChar
       },
       rightPriceScale: {
         borderColor: "#27272a",
+        scaleMargins: {
+          top: 0.1,
+          bottom: 0.1,
+        },
       },
       timeScale: {
         borderColor: "#27272a",
@@ -116,7 +121,7 @@ export default function TradingChart({ candles, signal, timeframe }: TradingChar
     entryLineRef.current = series.createPriceLine({
       price: signal.entryPrice,
       color: "#38bdf8",
-      lineWidth: 1,
+      lineWidth: 2,
       lineStyle: 2,
       axisLabelVisible: true,
       title: "ENTRY",
@@ -125,7 +130,7 @@ export default function TradingChart({ candles, signal, timeframe }: TradingChar
     slLineRef.current = series.createPriceLine({
       price: signal.stopLoss,
       color: "#ef4444",
-      lineWidth: 1,
+      lineWidth: 2,
       lineStyle: 0,
       axisLabelVisible: true,
       title: "SL",
@@ -134,7 +139,7 @@ export default function TradingChart({ candles, signal, timeframe }: TradingChar
     tp1LineRef.current = series.createPriceLine({
       price: signal.takeProfit1,
       color: "#10b981",
-      lineWidth: 1,
+      lineWidth: 2,
       lineStyle: 2,
       axisLabelVisible: true,
       title: "TP1",
@@ -143,36 +148,12 @@ export default function TradingChart({ candles, signal, timeframe }: TradingChar
     tp2LineRef.current = series.createPriceLine({
       price: signal.takeProfit2,
       color: "#2dd4bf",
-      lineWidth: 1,
+      lineWidth: 2,
       lineStyle: 0,
       axisLabelVisible: true,
       title: "TP2",
     });
   }, [signal]);
 
-  return (
-    <div className="flex flex-col bg-[#121214] border border-[#27272a] rounded-xl p-3.5 shadow-sm">
-      <div className="flex items-center justify-between pb-2 border-b border-zinc-800 mb-2 text-xs">
-        <div className="flex items-center gap-2">
-          <span className="font-semibold text-zinc-200">
-            BTC/USD Candlestick
-          </span>
-          <span className="px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 text-[10px] font-semibold">
-            {timeframe}
-          </span>
-        </div>
-        <div className="flex items-center gap-2 text-zinc-500 text-[11px]">
-          <span>● EMA 9/21/50</span>
-        </div>
-      </div>
-
-      <div ref={chartContainerRef} className="w-full h-[420px] rounded overflow-hidden relative">
-        {(!candles || candles.length === 0) && (
-          <div className="absolute inset-0 flex items-center justify-center text-xs text-zinc-500">
-            Memuat grafik...
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  return <div ref={chartContainerRef} className="w-full h-full" />;
 }
