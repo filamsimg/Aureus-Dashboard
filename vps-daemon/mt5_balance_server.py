@@ -1,8 +1,10 @@
 """
-Aureus VPS Micro-Bridge (Python) - Pure Read-Only Mode
+Aureus VPS Micro-Bridge & Autonomous Sniper Bot (Python)
 Runs on Windows VPS (109.111.52.163) alongside MetaTrader 5.
 Directly reads live balance and ticks from the active MT5 window.
-Zero login calls, zero extra accounts, 100% read-only.
+Integrated with:
+1. HTTP Micro-Bridge for Aureus Next.js Web Dashboard (Port 8000)
+2. Aureus AI Sniper Bot (Step-Ladder Ratchet 50% & 75%, Telegram Notifier, Circuit Breaker)
 """
 
 import sys
@@ -33,12 +35,24 @@ logger = logging.getLogger("VPSBridge")
 
 PORT = 8000
 
+# Import Sniper Bot Module
+try:
+    from aureus_sniper_bot import AureusSniperBot
+    SNIPER_MODULE_AVAILABLE = True
+except ImportError:
+    try:
+        from vps_daemon.aureus_sniper_bot import AureusSniperBot
+        SNIPER_MODULE_AVAILABLE = True
+    except ImportError:
+        AureusSniperBot = None
+        SNIPER_MODULE_AVAILABLE = False
+
 # Global cached state to guarantee 0ms response time
 LATEST_STATE = {
     "account": {
         "connected": False,
-        "balance": 20.0,
-        "equity": 20.0,
+        "balance": 24.26,
+        "equity": 24.26,
         "currency": "USD",
         "login": "268119731",
         "server": "Exness-MT5Real39",
@@ -56,8 +70,8 @@ LATEST_STATE = {
     "candles": []
 }
 
-def mt5_worker_loop():
-    """Background thread that reads active MT5 data. Never calls mt5.login()."""
+def mt5_worker_loop(sniper_bot=None):
+    """Background thread that reads active MT5 data and drives the sniper bot."""
     global LATEST_STATE
     logger.info("Worker MT5 dimulai. Membaca terminal MT5 yang sedang aktif...")
     
@@ -90,8 +104,8 @@ def mt5_worker_loop():
             acc = mt5.account_info()
             if acc:
                 d = acc._asdict()
-                bal = round(float(d.get("balance", 20.0)), 2)
-                eq = round(float(d.get("equity", 20.0)), 2)
+                bal = round(float(d.get("balance", 24.26)), 2)
+                eq = round(float(d.get("equity", 24.26)), 2)
                 cur = d.get("currency", "USD")
                 srv = d.get("server", "Exness-MT5Real39")
                 login_id = d.get("login")
@@ -104,8 +118,8 @@ def mt5_worker_loop():
                     "equity": eq,
                     "currency": cur,
                     "leverage": d.get("leverage", 2000),
-                    "free_margin": round(float(d.get("margin_free", 20.0)), 2),
-                    "company": d.get("company", "Exness")
+                    "free_margin": round(float(d.get("margin_free", 24.26)), 2),
+                    "company": d.get("company", "Exness Technologies Ltd")
                 }
             else:
                 LATEST_STATE["account"]["connected"] = False
@@ -143,6 +157,17 @@ def mt5_worker_loop():
                         "volume": int(r['tick_volume'])
                     })
                 LATEST_STATE["candles"] = c_list
+
+            # 4. Jalankan Siklus Sniper Bot Otomatis (Anti-MC & Tangga Profit 50%-75%)
+            if sniper_bot and LATEST_STATE["account"].get("connected"):
+                try:
+                    sniper_bot.run_cycle(
+                        acc_info=LATEST_STATE["account"],
+                        current_tick=LATEST_STATE["tick"],
+                        candles_m5=LATEST_STATE["candles"]
+                    )
+                except Exception as bot_err:
+                    logger.error(f"Error pada siklus Sniper Bot: {bot_err}")
 
             # Cetak status live di layar setiap 5 detik
             now = time.time()
@@ -224,15 +249,26 @@ def run():
     print("=" * 60)
     print("      AUREUS AI TRADER - MT5 LIVE EXNESS BRIDGE")
     print("=" * 60)
-    print(f"-> Mode: Pure Read-Only (Membaca langsung dari GUI MT5 aktif)")
-    print(f"-> Port HTTP: {PORT}")
+    print(f"-> Port HTTP Bridge : {PORT}")
+    print(f"-> Mode Operasi     : Pure Read-Only + Autonomous Sniper Bot")
+    print(f"-> Proteksi Risiko  : Tangga Profit 50% & 75% + Rem Anti-MC")
+    print(f"-> Notifikasi       : Telegram @AureusAITraderBot")
     print("=" * 60)
+
+    # Inisialisasi Sniper Bot
+    sniper_bot = None
+    if SNIPER_MODULE_AVAILABLE and AureusSniperBot:
+        try:
+            sniper_bot = AureusSniperBot()
+            logger.info("🤖 Aureus Sniper Bot aktif (Tangga Profit 50% & 75% + Notifikasi Telegram)")
+        except Exception as e:
+            logger.warning(f"Gagal inisialisasi Sniper Bot: {e}")
 
     server_address = ("0.0.0.0", PORT)
     httpd = ResilientServer(server_address, BalanceHandler)
-    logger.info(f"🚀 Bridge Server aktif di port {PORT} (Siap menerima request dari Dashboard)")
+    logger.info(f"🚀 Bridge Server aktif di port {PORT} (Siap melayani Web Dashboard)")
 
-    t = threading.Thread(target=mt5_worker_loop, daemon=True)
+    t = threading.Thread(target=mt5_worker_loop, args=(sniper_bot,), daemon=True)
     t.start()
 
     try:
