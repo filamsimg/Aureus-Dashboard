@@ -1,9 +1,10 @@
 """
 Aureus VPS Micro-Bridge (Python)
 Runs on Windows VPS (109.111.52.163) alongside MetaTrader 5.
-Reads real-time account balance, equity, and currency (USD) dynamically
-from whatever account is currently logged into the MT5 terminal.
-No hardcoded account credentials!
+Serves:
+1. Real-time balance & equity (USD)
+2. Live Exness BTCUSDm / BTCUSD tick & spread
+3. Exact Exness candlestick history
 """
 
 import sys
@@ -40,6 +41,16 @@ class BalanceHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/account") or self.path.startswith("/balance"):
             account_data = self.get_mt5_account()
             self.send_json(account_data)
+            return
+
+        if self.path.startswith("/api/price") or self.path.startswith("/api/tick"):
+            tick_data = self.get_mt5_tick()
+            self.send_json(tick_data)
+            return
+
+        if self.path.startswith("/api/exness/candles") or self.path.startswith("/api/candles"):
+            candles_data = self.get_mt5_candles()
+            self.send_json(candles_data)
             return
 
         self.send_response(404)
@@ -106,12 +117,56 @@ class BalanceHandler(BaseHTTPRequestHandler):
                 "currency": "USD"
             }
 
+    def get_mt5_tick(self) -> dict:
+        if not MT5_AVAILABLE or not mt5.initialize():
+            return {"connected": False, "error": "MT5 not available"}
+
+        for sym in ["BTCUSDm", "BTCUSDc", "BTCUSD", "BTCUSDT"]:
+            if mt5.symbol_select(sym, True):
+                tick = mt5.symbol_info_tick(sym)
+                if tick:
+                    spread = round(tick.ask - tick.bid, 2)
+                    return {
+                        "connected": True,
+                        "symbol": sym,
+                        "bid": round(tick.bid, 2),
+                        "ask": round(tick.ask, 2),
+                        "last": round(tick.last or tick.bid, 2),
+                        "spread": spread,
+                        "time": int(tick.time)
+                    }
+        return {"connected": False, "error": "BTC symbol not found in MarketWatch"}
+
+    def get_mt5_candles(self) -> dict:
+        if not MT5_AVAILABLE or not mt5.initialize():
+            return {"connected": False, "candles": []}
+
+        for sym in ["BTCUSDm", "BTCUSDc", "BTCUSD", "BTCUSDT"]:
+            if mt5.symbol_select(sym, True):
+                rates = mt5.copy_rates_from_pos(sym, mt5.TIMEFRAME_M5, 0, 70)
+                if rates is not None and len(rates) > 0:
+                    candles = []
+                    for r in rates:
+                        candles.append({
+                            "time": int(r['time']),
+                            "open": round(float(r['open']), 2),
+                            "high": round(float(r['high']), 2),
+                            "low": round(float(r['low']), 2),
+                            "close": round(float(r['close']), 2),
+                            "volume": int(r['tick_volume'])
+                        })
+                    return {"connected": True, "symbol": sym, "candles": candles}
+        return {"connected": False, "candles": []}
+
 def run():
     server_address = ("0.0.0.0", PORT)
     httpd = HTTPServer(server_address, BalanceHandler)
     logger.info(f"=======================================================")
     logger.info(f"🚀 Aureus VPS MT5 Bridge running on port {PORT}")
-    logger.info(f"Endpoint: http://109.111.52.163:{PORT}/api/account")
+    logger.info(f"Endpoints:")
+    logger.info(f"  - Account: http://109.111.52.163:{PORT}/api/account")
+    logger.info(f"  - Price:   http://109.111.52.163:{PORT}/api/price")
+    logger.info(f"  - Candles: http://109.111.52.163:{PORT}/api/candles")
     logger.info(f"=======================================================")
     try:
         httpd.serve_forever()
