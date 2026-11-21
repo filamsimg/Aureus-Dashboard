@@ -58,11 +58,11 @@ except ImportError:
 LATEST_STATE = {
     "account": {
         "connected": False,
-        "balance": 31.85,
-        "equity": 31.85,
+        "balance": 0.0,
+        "equity": 0.0,
         "currency": "USD",
-        "login": "268119731",
-        "server": "Exness-MT5Real39",
+        "login": "",
+        "server": "",
         "error": "Menghubungkan ke MetaTrader 5..."
     },
     "tick": {
@@ -75,6 +75,7 @@ LATEST_STATE = {
         "time": 0
     },
     "candles": [],
+    "candles_mtf": {},
     "analysis": {
         "status": "standby",
         "direction": "WAIT",
@@ -178,16 +179,24 @@ def mt5_worker_loop(sniper_bot=None):
                         }
                         break
 
-            # 3. Update Multi-Timeframe Candles (M1, M5, M15)
+            # 3. Update Multi-Timeframe Candles (M1, M5, M15, H1)
             active_sym = LATEST_STATE["tick"].get("symbol", sym_target)
             rates_m1 = mt5.copy_rates_from_pos(active_sym, mt5.TIMEFRAME_M1, 0, 50)
             rates_m5 = mt5.copy_rates_from_pos(active_sym, mt5.TIMEFRAME_M5, 0, 70)
             rates_m15 = mt5.copy_rates_from_pos(active_sym, mt5.TIMEFRAME_M15, 0, 50)
+            rates_h1 = mt5.copy_rates_from_pos(active_sym, mt5.TIMEFRAME_H1, 0, 50)
 
             c_m1 = rates_to_list(rates_m1)
             c_m5 = rates_to_list(rates_m5)
             c_m15 = rates_to_list(rates_m15)
+            c_h1 = rates_to_list(rates_h1)
             LATEST_STATE["candles"] = c_m5
+            LATEST_STATE["candles_mtf"] = {
+                "M1": c_m1,
+                "M5": c_m5,
+                "M15": c_m15,
+                "H1": c_h1,
+            }
 
             # 4. Jalankan Siklus Otonom Sniper Bot (24/7)
             if sniper_bot and LATEST_STATE["account"].get("connected"):
@@ -203,13 +212,13 @@ def mt5_worker_loop(sniper_bot=None):
                 except Exception as bot_err:
                     logger.error(f"Error pada siklus Sniper Bot: {bot_err}")
 
-            # 5. Sinkronisasi Deals History MT5 setiap 10 detik
+            # 5. Sinkronisasi Deals History MT5 setiap 5 detik
             now = time.time()
-            if now - last_history_fetch >= 10:
+            if now - last_history_fetch >= 5:
                 last_history_fetch = now
                 try:
                     dt_now = datetime.now()
-                    deals = mt5.history_deals_get(dt_now - timedelta(days=7), dt_now)
+                    deals = mt5.history_deals_get(dt_now - timedelta(days=7), dt_now + timedelta(days=1))
                     if deals:
                         hist_list = []
                         # Ambil deal keluar (DEAL_ENTRY_OUT) atau deal selesai
@@ -282,10 +291,20 @@ class BalanceHandler(BaseHTTPRequestHandler):
             return
 
         if self.path.startswith("/api/candles"):
+            tf_query = "M5"
+            if "tf=" in self.path:
+                try:
+                    tf_part = self.path.split("tf=")[1].split("&")[0].upper()
+                    if tf_part in ["M1", "M5", "M15", "H1"]:
+                        tf_query = tf_part
+                except Exception:
+                    pass
+            candles_to_send = LATEST_STATE.get("candles_mtf", {}).get(tf_query, LATEST_STATE["candles"])
             self.send_json({
                 "connected": LATEST_STATE["tick"].get("connected", False),
                 "symbol": LATEST_STATE["tick"].get("symbol", "BTCUSDm"),
-                "candles": LATEST_STATE["candles"]
+                "timeframe": tf_query,
+                "candles": candles_to_send
             })
             return
 

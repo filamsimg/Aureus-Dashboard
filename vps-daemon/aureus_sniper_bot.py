@@ -306,7 +306,7 @@ class AureusSniperBot:
 
         pnl_pts = (cur_price - entry) if is_buy else (entry - cur_price)
         pnl_usd = round(pnl_pts * 0.01, 2)
-        stages = ["Memantau Target (+100)", "Lock 50% Profit", "Lock 75% Profit", "Lock 100% TP1"]
+        stages = ["Memantau Tangga 1 (+60)", "Tangga 1 (+30 pts Lock)", "Tangga 2 (+60 pts Lock)", "Tangga 3 (+100 pts Lock)"]
         stage_desc = stages[min(self.ladder_stage, 3)]
 
         # Update latest_analysis saat ada posisi aktif agar Web Dashboard sinkron sempurna
@@ -328,52 +328,53 @@ class AureusSniperBot:
             "circuit_breaker": self.circuit_breaker_active,
         }
 
-        # Tangga 1: +100 poin -> Lock 50% target (+60 pts / +$0.60)
-        if pnl_pts >= 100.0 and self.ladder_stage < 1:
-            target_sl = round(entry + 60.0 if is_buy else entry - 60.0, 2)
+        # Tangga 1: +60 poin -> Kunci +30 poin (+0.30 USD Untung Bersih - Anti Reversal)
+        if pnl_pts >= 60.0 and self.ladder_stage < 1:
+            target_sl = round(entry + 30.0 if is_buy else entry - 30.0, 2)
             if (is_buy and target_sl > cur_sl) or (not is_buy and (cur_sl == 0 or target_sl < cur_sl)):
                 if self._modify_sl(pos, target_sl, cur_tp):
                     self.ladder_stage = 1
                     msg = (
-                        f"🛡️ <b>[TANGGA 1] PROFIT 50% TERKUNCI!</b>\n"
+                        f"🛡️ <b>[TANGGA 1] PROFIT TERKUNCI (+60 PTS)!</b>\n"
                         f"────────────────────────\n"
                         f"Pair     : {SYMBOL_TARGET} ({self.pos_type})\n"
                         f"Floating : +${pnl_pts * 0.01:.2f} USD\n"
-                        f"Aksi     : SL digeser ke <b>${target_sl:,.2f}</b>\n"
-                        f"Status   : <b>+$0.60 USD Terjamin Masuk Saldo!</b>"
+                        f"Aksi     : SL digeser ke <b>${target_sl:,.2f}</b> (+30 pts)\n"
+                        f"Status   : <b>+$0.30 USD Terjamin Masuk Saldo!</b>\n"
+                        f"Target   : Menuju Tangga 2 (+100 pts)"
                     )
                     self.telegram.send(msg)
 
-        # Tangga 2: +110 poin -> Lock 75% target (+90 pts / +$0.90)
-        if pnl_pts >= 110.0 and self.ladder_stage < 2:
-            target_sl = round(entry + 90.0 if is_buy else entry - 90.0, 2)
+        # Tangga 2: +100 poin -> Kunci +60 poin (+0.60 USD Untung Bersih)
+        if pnl_pts >= 100.0 and self.ladder_stage < 2:
+            target_sl = round(entry + 60.0 if is_buy else entry - 60.0, 2)
             if (is_buy and target_sl > cur_sl) or (not is_buy and (cur_sl == 0 or target_sl < cur_sl)):
                 if self._modify_sl(pos, target_sl, cur_tp):
                     self.ladder_stage = 2
                     msg = (
-                        f"🚀 <b>[TANGGA 2] PROFIT 75% TERKUNCI TEBAL!</b>\n"
+                        f"🚀 <b>[TANGGA 2] PROFIT 60% TERKUNCI (+100 PTS)!</b>\n"
                         f"────────────────────────\n"
                         f"Pair     : {SYMBOL_TARGET} ({self.pos_type})\n"
                         f"Floating : +${pnl_pts * 0.01:.2f} USD\n"
-                        f"Aksi     : SL dinaikkan ke <b>${target_sl:,.2f}</b>\n"
-                        f"Status   : <b>+$0.90 USD Sukses Diamankan!</b>\n"
-                        f"Target   : Menuju TP1 penuh ($1.20)"
+                        f"Aksi     : SL dinaikkan ke <b>${target_sl:,.2f}</b> (+60 pts)\n"
+                        f"Status   : <b>+$0.60 USD Sukses Diamankan!</b>\n"
+                        f"Target   : Menuju Tangga 3 (+140 pts)"
                     )
                     self.telegram.send(msg)
 
-        # Tangga 3: +120 poin (TP1) -> Lock 100% TP1 (+120 pts / +$1.20), lepas ke TP2
-        if pnl_pts >= 120.0 and self.ladder_stage < 3:
-            target_sl = round(entry + 120.0 if is_buy else entry - 120.0, 2)
+        # Tangga 3: +140 poin -> Kunci +100 poin (+1.00 USD), lepas ke TP2 (+200 pts)
+        if pnl_pts >= 140.0 and self.ladder_stage < 3:
+            target_sl = round(entry + 100.0 if is_buy else entry - 100.0, 2)
             target_tp2 = round(entry + TARGET_TP2_POINTS if is_buy else entry - TARGET_TP2_POINTS, 2)
             if (is_buy and target_sl > cur_sl) or (not is_buy and (cur_sl == 0 or target_sl < cur_sl)):
                 if self._modify_sl(pos, target_sl, target_tp2):
                     self.ladder_stage = 3
                     msg = (
-                        f"🎯 <b>[TANGGA 3] TP1 TEMBUS — KUNCI 100%!</b>\n"
+                        f"🎯 <b>[TANGGA 3] TP1 TEMBUS — KUNCI +$1.00 USD!</b>\n"
                         f"────────────────────────\n"
                         f"Pair     : {SYMBOL_TARGET} ({self.pos_type})\n"
-                        f"Aksi     : SL di-lock di level TP1 (${target_sl:,.2f})\n"
-                        f"Status   : <b>+$1.20 USD Milik Anda!</b>\n"
+                        f"Aksi     : SL di-lock di level +100 pts (${target_sl:,.2f})\n"
+                        f"Status   : <b>+$1.00 USD Milik Anda!</b>\n"
                         f"Next     : Posisi bebas berlari mengejar TP2 (+$2.00)"
                     )
                     self.telegram.send(msg)
@@ -624,7 +625,7 @@ class AureusSniperBot:
                 f"Alasan   : {' • '.join(reasons)}\n"
                 f"Saldo    : ${acc_info.get('balance', 31.85):.2f} USD\n"
                 f"────────────────────────\n"
-                f"<i>Bot mengawal posisi 24/7 dengan tangga profit 50% & 75%.</i>"
+                f"<i>Bot mengawal posisi 24/7 dengan tangga profit bertingkat (+60, +100, +140 pts).</i>"
             )
             self.telegram.send(msg)
             logger.info(f"Order {direction} sukses dieksekusi: Ticket #{res.order}")

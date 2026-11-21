@@ -91,7 +91,7 @@ export default function ScalpCard({ signal }: ScalpCardProps) {
                 <strong className="text-zinc-100">Eksekusi Otomatis:</strong> Saat keyakinan mencapai <strong>&ge; 55%</strong>, bot langsung membuka order 0.01 lot di Exness Real tanpa intervensi manual.
               </li>
               <li>
-                <strong className="text-zinc-100">Proteksi Tangga Profit:</strong> Order dikawal bertingkat (+100 poin lock 50%, +110 poin lock 75%, +120 poin lock 100% TP1).
+                <strong className="text-zinc-100">Proteksi Tangga Profit:</strong> Order dikawal bertingkat (+60 poin lock +$0.30, +100 poin lock +$0.60, +140 poin lock +$1.00 & lepas TP2).
               </li>
               <li>
                 <strong className="text-zinc-100">Kendali Terpusat:</strong> Sistem beroperasi mandiri di VPS Exness dengan proteksi akun terukur.
@@ -196,7 +196,7 @@ export default function ScalpCard({ signal }: ScalpCardProps) {
 
       {/* Footer Info */}
       <div className="pt-3 mt-2 border-t border-zinc-800/70 text-center text-xs text-zinc-400">
-        🛡️ Posisi dikawal otomatis oleh Bot VPS dengan tangga profit 50% & 75%. Notifikasi real-time terkirim ke Telegram.
+        🛡️ Posisi dikawal otomatis oleh Bot VPS dengan tangga profit bertingkat (+60, +100, +140 pts). Notifikasi real-time terkirim ke Telegram.
       </div>
     </div>
   );

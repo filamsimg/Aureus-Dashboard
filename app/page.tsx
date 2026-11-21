@@ -24,9 +24,9 @@ export default function DashboardPage() {
   const [signal, setSignal] = useState<(ScalpSignal & { isPaused?: boolean; vpsLive?: boolean }) | null>(null);
 
   // Exness Account Balance (SSOT from VPS MT5 / Bridge)
-  const [accountBalance, setAccountBalance] = useState<number>(31.85);
+  const [accountBalance, setAccountBalance] = useState<number>(0);
   const [accountCurrency, setAccountCurrency] = useState<string>("USD");
-  const [accountLogin, setAccountLogin] = useState<string | number>("268119731");
+  const [accountLogin, setAccountLogin] = useState<string | number>("Memuat...");
   const [vpsConnected, setVpsConnected] = useState<boolean>(false);
 
   const [trades, setTrades] = useState<TradeEntry[]>([]);
@@ -197,6 +197,7 @@ export default function DashboardPage() {
           runAnalysis();
           loadCandles(timeframe);
           fetchAccount();
+          loadJournal();
           return 5;
         }
         return prev - 1;
@@ -289,8 +290,10 @@ export default function DashboardPage() {
               onClick={() => {
                 runAnalysis();
                 loadCandles(timeframe);
+                fetchAccount();
+                loadJournal();
                 setCountdown(5);
-                showToast("Data pasar diperbarui!");
+                showToast("Data pasar & riwayat diperbarui!");
               }}
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border border-zinc-800/80 text-xs sm:text-sm font-semibold transition active:scale-95"
               title="Klik untuk Refresh sekarang"
@@ -400,21 +403,21 @@ export default function DashboardPage() {
             <div className="space-y-2 text-xs">
               <div className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-900/80 border border-zinc-800/70">
                 <span className="font-semibold text-zinc-300 flex items-center gap-1.5">
-                  <TrendingUp className="w-3.5 h-3.5 text-emerald-400" /> Tangga 1 (+100 poin)
+                  <TrendingUp className="w-3.5 h-3.5 text-emerald-400" /> Tangga 1 (+60 poin)
                 </span>
-                <span className="font-extrabold text-emerald-400">Kunci 50% Profit (+60 pts / +$0.60)</span>
+                <span className="font-extrabold text-emerald-400">Kunci Untung Bersih (+30 pts / +$0.30)</span>
               </div>
               <div className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-900/80 border border-zinc-800/70">
                 <span className="font-semibold text-zinc-300 flex items-center gap-1.5">
-                  <TrendingUp className="w-3.5 h-3.5 text-emerald-400" /> Tangga 2 (+110 poin)
+                  <TrendingUp className="w-3.5 h-3.5 text-emerald-400" /> Tangga 2 (+100 poin)
                 </span>
-                <span className="font-extrabold text-emerald-400">Kunci 75% Profit (+90 pts / +$0.90)</span>
+                <span className="font-extrabold text-emerald-400">Kunci 60% Profit (+60 pts / +$0.60)</span>
               </div>
               <div className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-900/80 border border-zinc-800/70">
                 <span className="font-semibold text-zinc-300 flex items-center gap-1.5">
-                  <TrendingUp className="w-3.5 h-3.5 text-emerald-400" /> Target Penuh (+120 poin)
+                  <TrendingUp className="w-3.5 h-3.5 text-emerald-400" /> Tangga 3 (+140 poin)
                 </span>
-                <span className="font-extrabold text-emerald-300">Target TP1 100% (+120 pts / +$1.20)</span>
+                <span className="font-extrabold text-emerald-300">Kunci +100 pts (+$1.00) & Lepas TP2</span>
               </div>
             </div>
 
