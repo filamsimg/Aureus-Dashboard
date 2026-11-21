@@ -96,10 +96,13 @@ def deploy():
         f'MAGIC_NUMBER="{env_vars.get("TRADING_MAGIC_NUMBER", "778898")}"',
         f'FIXED_LOT="{env_vars.get("TRADING_FIXED_LOT", "0.01")}"',
         f'DEFAULT_SL_POINTS="{env_vars.get("TRADING_SL_POINTS", "80.0")}"',
-        f'TARGET_TP1_POINTS="{env_vars.get("TRADING_TP1_POINTS", "120.0")}"',
+        f'TARGET_TP1_POINTS="{env_vars.get("TRADING_TP1_POINTS", "140.0")}"',
         f'TARGET_TP2_POINTS="{env_vars.get("TRADING_TP2_POINTS", "200.0")}"',
         f'DAILY_LOSS_LIMIT_USD="{env_vars.get("TRADING_MAX_DAILY_LOSS", "1.80")}"',
-        f'CONFIDENCE_THRESHOLD="{env_vars.get("TRADING_CONFIDENCE_THRESHOLD", "55")}"',
+        f'CONFIDENCE_THRESHOLD="{env_vars.get("TRADING_CONFIDENCE_THRESHOLD", "65")}"',
+        f'MIN_ROOM_TO_RUN_POINTS="{env_vars.get("TRADING_MIN_ROOM_TO_RUN", "80.0")}"',
+        f'WIN_COOLDOWN_SECONDS="{env_vars.get("TRADING_WIN_COOLDOWN", "300")}"',
+        f'COOLDOWN_SECONDS="{env_vars.get("TRADING_LOSS_COOLDOWN", "900")}"',
     ]
     vps_env_content = "\n".join(vps_env_lines).encode("utf-8")
     

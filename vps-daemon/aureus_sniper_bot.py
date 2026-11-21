@@ -73,8 +73,8 @@ MAGIC_NUMBER = int(os.getenv("MAGIC_NUMBER", "778898"))
 FIXED_LOT = float(os.getenv("FIXED_LOT", "0.01"))
 
 DEFAULT_SL_POINTS = float(os.getenv("DEFAULT_SL_POINTS", "80.0"))     # 80 poin = -$0.80 USD
-TARGET_TP1_POINTS = float(os.getenv("TARGET_TP1_POINTS", "120.0"))   # 120 poin = +$1.20 USD
-TARGET_TP2_POINTS = float(os.getenv("TARGET_TP2_POINTS", "200.0"))   # 200 poin = +$2.00 USD
+TARGET_TP1_POINTS = float(os.getenv("TARGET_TP1_POINTS", "140.0"))   # 140 poin = +$1.40 USD (Kunci Tangga 3)
+TARGET_TP2_POINTS = float(os.getenv("TARGET_TP2_POINTS", "200.0"))   # 200 poin = +$2.00 USD (Runner)
 
 DAILY_LOSS_LIMIT_USD = float(os.getenv("DAILY_LOSS_LIMIT_USD", "1.80"))
 MAX_CONSECUTIVE_LOSS = int(os.getenv("MAX_CONSECUTIVE_LOSS", "2"))
@@ -192,17 +192,24 @@ class TelegramClient:
             self.send(bot.get_balance_text())
         elif clean_cmd in ["/stop", "stop", "jeda"]:
             bot.is_paused = True
-            self.send("⏸️ <b>BOT DIJEDA OLEH PENGGUNA</b>\n\nBot tidak akan membuka order baru di MT5. Radar analisa pasar tetap aktif memantau di web.")
+            self.send("⏸️ <b>BOT DIJEDA OLEH PENGGUNA</b>\n\nEksekusi order MT5 dikunci. Radar analisa pasar tetap aktif memantau di web. Ketik /start untuk mengaktifkan kembali.")
         elif clean_cmd in ["/start", "start", "nyalakan"]:
             bot.is_paused = False
-            self.send("▶️ <b>BOT DIAKTIFKAN KEMBALI</b>\n\nBot kembali memindai & siap mengeksekusi order 0.01 lot BTCUSDm saat sinyal terkonfirmasi (>= 55%).")
+            self.send(
+                f"▶️ <b>BOT DIAKTIFKAN KEMBALI (SIAGA 24/7)</b>\n\n"
+                f"• Target Pair  : <b>{SYMBOL_TARGET}</b> ({FIXED_LOT} lot)\n"
+                f"• Syarat Entry : Konfluensi >= <b>{int(CONFIDENCE_THRESHOLD)}%</b> & Ruang Gerak >= {int(MIN_ROOM_TO_RUN_POINTS)} pts\n"
+                f"• Proteksi     : Anti-Pucuk, Anti-Lembah, & Jeda {WIN_COOLDOWN_SECONDS//60}m Pasca-Profit\n"
+                f"• Pengawalan   : Tangga Profit bertingkat (+60, +100, +140 pts)"
+            )
         elif clean_cmd in ["/help", "help"]:
             self.send(
-                "🤖 <b>PERINTAH BOT AUREUS</b>\n\n"
-                "/status - Cek posisi berjalan & harga live\n"
-                "/saldo - Cek saldo, equity & margin Exness\n"
-                "/stop - Jeda bot sementara\n"
-                "/start - Lanjutkan pemindaian pasar"
+                f"🤖 <b>PERINTAH & STATUS SISTEM AUREUS</b>\n\n"
+                f"/status - Cek posisi berjalan, level profit & status filter\n"
+                f"/saldo  - Cek saldo, equity & margin riil Exness\n"
+                f"/stop   - Jeda eksekusi order MT5 sementara\n"
+                f"/start  - Aktifkan kesiagaan order (>= {int(CONFIDENCE_THRESHOLD)}%)\n\n"
+                f"<i>Sistem berjalan otonom di VPS dengan proteksi Anti-Pucuk & Tangga Profit.</i>"
             )
 
 # ==========================================
@@ -406,7 +413,7 @@ class AureusSniperBot:
                     pnl = float(d.profit)
 
         self.daily_pnl_usd += pnl
-        current_bal = acc_info.get("balance", 31.85)
+        current_bal = acc_info.get("balance", 0.0)
         pnl_sign = "+" if self.daily_pnl_usd >= 0 else "-"
 
         if pnl > 0:
@@ -418,7 +425,7 @@ class AureusSniperBot:
                 f"Hasil    : <b>+${pnl:.2f} USD</b>\n"
                 f"Saldo    : <b>${current_bal:.2f} USD</b>\n"
                 f"PnL Hari : {pnl_sign}${abs(self.daily_pnl_usd):.2f} USD\n"
-                f"Cooldown : 5 menit jeda pasca-profit (anti-pucuk)."
+                f"Cooldown : {WIN_COOLDOWN_SECONDS//60} menit jeda pasca-profit (anti-pucuk)."
             )
             self.telegram.send(msg)
         else:
@@ -430,7 +437,7 @@ class AureusSniperBot:
                 f"Hasil    : <b>-${abs(pnl):.2f} USD</b> (Terukur)\n"
                 f"Saldo    : <b>${current_bal:.2f} USD</b>\n"
                 f"Loss Seq : {self.daily_consecutive_losses}/{MAX_CONSECUTIVE_LOSS}\n"
-                f"Cooldown : 15 menit jeda analisis."
+                f"Cooldown : {COOLDOWN_SECONDS//60} menit jeda analisa."
             )
             self.telegram.send(msg)
 
@@ -669,7 +676,7 @@ class AureusSniperBot:
                 f"Batas SL : ${sl_price:,.2f} (-${sl_dist*0.01:.2f} USD)\n"
                 f"Target TP: ${tp1_price:,.2f} (+${TARGET_TP1_POINTS*0.01:.2f} USD)\n"
                 f"Alasan   : {' • '.join(reasons)}\n"
-                f"Saldo    : ${acc_info.get('balance', 31.85):.2f} USD\n"
+                f"Saldo    : ${acc_info.get('balance', 0.0):.2f} USD\n"
                 f"────────────────────────\n"
                 f"<i>Bot mengawal posisi 24/7 dengan tangga profit bertingkat (+60, +100, +140 pts).</i>"
             )
@@ -816,19 +823,32 @@ class AureusSniperBot:
                 f"Status   : Dikawal ketat oleh Bot Sniper."
             )
         else:
-            cb = "AKTIF (Istirahat)" if self.circuit_breaker_active else "SIAGA"
+            now_ts = time.time()
+            cd_desc = "Siaga Penuh"
+            if self.circuit_breaker_active:
+                cd_desc = "🛑 Rem Darurat Aktif (Istirahat s/d 00:00)"
+            elif (now_ts - self.last_win_time) < WIN_COOLDOWN_SECONDS:
+                rem = int(WIN_COOLDOWN_SECONDS - (now_ts - self.last_win_time))
+                cd_desc = f"⏳ Jeda Pasca-Profit ({rem}s tersisa)"
+            elif (now_ts - self.last_loss_time) < COOLDOWN_SECONDS:
+                rem = int(COOLDOWN_SECONDS - (now_ts - self.last_loss_time))
+                cd_desc = f"⏳ Jeda Pasca-CutLoss ({rem}s tersisa)"
+
             sign_td = "+" if self.daily_pnl_usd >= 0 else "-"
             cur_signal = self.latest_analysis.get("signal", "TUNGGU (WAIT)")
             conf = self.latest_analysis.get("confidencePercent", 0)
+            bot_state = "⏸️ DIJEDA (Ketik /start)" if self.is_paused else "▶️ AKTIF MEMINDAI (24/7)"
             return (
                 f"💤 <b>TIDAK ADA POSISI TERBUKA</b>\n"
                 f"────────────────────────\n"
-                f"Status Bot  : {'DIJEDA' if self.is_paused else 'AKTIF MEMINDAI (24/7)'}\n"
-                f"Sinyal Terkini : <b>{cur_signal}</b> (Keyakinan: {conf}%)\n"
-                f"Rem Harian  : {cb}\n"
-                f"PnL Bot Hari: {sign_td}${abs(self.daily_pnl_usd):.2f} USD\n"
-                f"Loss Seq    : {self.daily_consecutive_losses}/{MAX_CONSECUTIVE_LOSS}\n"
-                f"Pasar       : Menunggu konfluensi setup >= {CONFIDENCE_THRESHOLD}%."
+                f"Mode Bot    : <b>{bot_state}</b>\n"
+                f"Kesiapan    : <b>{cd_desc}</b>\n"
+                f"Sinyal Live : <b>{cur_signal}</b> ({conf}%)\n"
+                f"Syarat Entry: Konfluensi >= <b>{int(CONFIDENCE_THRESHOLD)}%</b> & Ruang >= {int(MIN_ROOM_TO_RUN_POINTS)} pts\n"
+                f"PnL Hari Ini: <b>{sign_td}${abs(self.daily_pnl_usd):.2f} USD</b>\n"
+                f"Loss Beruntun: {self.daily_consecutive_losses}/{MAX_CONSECUTIVE_LOSS} (Maks -${DAILY_LOSS_LIMIT_USD:.2f})\n"
+                f"────────────────────────\n"
+                f"<i>Bot siap eksekusi otomatis 0.01 lot saat konfluensi terpenuhi.</i>"
             )
 
     def get_balance_text(self) -> str:

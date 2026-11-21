@@ -32,10 +32,10 @@ export default function JournalTable({ trades, stats }: JournalTableProps) {
   const [currentPage, setCurrentPage] = useState<number>(1);
   const itemsPerPage = 10;
 
-  // Timestamps for filtering
+  // Timestamps for filtering (Local day boundary so it matches the user's calendar date)
   const { startOfToday, sevenDaysAgo } = useMemo(() => {
     const now = new Date();
-    const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).getTime();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const week = now.getTime() - 7 * 24 * 60 * 60 * 1000;
     return { startOfToday: today, sevenDaysAgo: week };
   }, []);
