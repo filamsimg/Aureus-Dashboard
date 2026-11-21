@@ -23,7 +23,14 @@ export interface RiskProfile {
 }
 
 export interface ScalpSignal {
-  signal: "BELI (BUY)" | "JUAL (SELL)" | "TUNGGU (WAIT)" | "PASAR LIAR (TUNGGU)";
+  signal:
+    | "BELI (BUY)"
+    | "JUAL (SELL)"
+    | "TUNGGU (WAIT)"
+    | "PASAR LIAR (TUNGGU)"
+    | "TUNGGU (PASAR SIDEWAYS)"
+    | "TUNGGU (DEKAT RESISTENSI)"
+    | "TUNGGU (DEKAT SUPPORT)";
   direction: "BUY" | "SELL" | "WAIT";
   score: number;
   confidencePercent: number;
@@ -123,6 +130,18 @@ export function evaluateScalp(
   let slDistance = Number(Math.max(70, Math.min(130, atrM5 * 1.1)).toFixed(2));
   const isVolatilityTooHigh = atrM5 > 140;
 
+  // Room-to-Run & Sideways Gating
+  const sub20 = ratesM5.slice(-20);
+  const recentHigh20 = sub20.length > 0 ? Math.max(...sub20.map((c) => c.high)) : currentPrice;
+  const recentLow20 = sub20.length > 0 ? Math.min(...sub20.map((c) => c.low)) : currentPrice;
+  const roomToHigh = recentHigh20 - currentPrice;
+  const roomToLow = currentPrice - recentLow20;
+  const minRoom = 80.0;
+
+  const adxM5 = m5?.adx ?? 25.0;
+  const isSideways = adxM5 < 20.0;
+  const CONFIDENCE_THRESHOLD = 65;
+
   let signalType: ScalpSignal["signal"] = "TUNGGU (WAIT)";
   let direction: ScalpSignal["direction"] = "WAIT";
 
@@ -130,12 +149,28 @@ export function evaluateScalp(
     signalType = "PASAR LIAR (TUNGGU)";
     direction = "WAIT";
     reasons.unshift(`⚠️ Gerakan candle terlalu panjang! Tahan saldo $${capital.toFixed(2)} Anda sampai pasar tenang.`);
-  } else if (score >= 55) {
-    signalType = "BELI (BUY)";
-    direction = "BUY";
-  } else if (score <= -55) {
-    signalType = "JUAL (SELL)";
-    direction = "SELL";
+  } else if (isSideways) {
+    signalType = "TUNGGU (PASAR SIDEWAYS)";
+    direction = "WAIT";
+    reasons.unshift(`⚠️ Pasar Sideways/Choppy (ADX M5 ${adxM5} < 20). Menahan peluru.`);
+  } else if (score >= CONFIDENCE_THRESHOLD) {
+    if (currentPrice < recentHigh20 && roomToHigh < minRoom) {
+      signalType = "TUNGGU (DEKAT RESISTENSI)";
+      direction = "WAIT";
+      reasons.unshift(`⚠️ Beli Ditolak: Plafon Resisten M5 hanya +${roomToHigh.toFixed(1)} pts (< ${minRoom} pts). Menghindari beli di pucuk.`);
+    } else {
+      signalType = "BELI (BUY)";
+      direction = "BUY";
+    }
+  } else if (score <= -CONFIDENCE_THRESHOLD) {
+    if (currentPrice > recentLow20 && roomToLow < minRoom) {
+      signalType = "TUNGGU (DEKAT SUPPORT)";
+      direction = "WAIT";
+      reasons.unshift(`⚠️ Jual Ditolak: Lantai Support M5 hanya -${roomToLow.toFixed(1)} pts (< ${minRoom} pts). Menghindari jual di lembah.`);
+    } else {
+      signalType = "JUAL (SELL)";
+      direction = "SELL";
+    }
   }
 
   const entryPrice = Number(currentPrice.toFixed(2));

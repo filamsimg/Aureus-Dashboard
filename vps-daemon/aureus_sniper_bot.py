@@ -78,8 +78,11 @@ TARGET_TP2_POINTS = float(os.getenv("TARGET_TP2_POINTS", "200.0"))   # 200 poin 
 
 DAILY_LOSS_LIMIT_USD = float(os.getenv("DAILY_LOSS_LIMIT_USD", "1.80"))
 MAX_CONSECUTIVE_LOSS = int(os.getenv("MAX_CONSECUTIVE_LOSS", "2"))
-COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", "900"))          # 15 menit
-CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "55.0"))
+CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "65.0"))
+COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", "900"))           # 15 menit post-loss
+WIN_COOLDOWN_SECONDS = int(os.getenv("WIN_COOLDOWN_SECONDS", "300"))   # 5 menit post-win (anti-pucuk)
+MIN_ROOM_TO_RUN_POINTS = float(os.getenv("MIN_ROOM_TO_RUN_POINTS", "80.0"))
+ADX_CHOP_THRESHOLD = float(os.getenv("ADX_CHOP_THRESHOLD", "20.0"))
 
 # ==========================================
 # 2. TELEGRAM CLIENT (CLEAN COMMANDS)
@@ -216,6 +219,7 @@ class AureusSniperBot:
         self.daily_consecutive_losses = 0
         self.circuit_breaker_active = False
         self.last_loss_time = 0.0
+        self.last_win_time = 0.0
 
         # Posisi aktif tracking
         self.tracked_ticket = None
@@ -407,13 +411,14 @@ class AureusSniperBot:
 
         if pnl > 0:
             self.daily_consecutive_losses = 0
+            self.last_win_time = time.time()
             msg = (
                 f"✅ <b>TRANSAKSI SELESAI — PROFIT!</b>\n"
                 f"────────────────────────\n"
                 f"Hasil    : <b>+${pnl:.2f} USD</b>\n"
                 f"Saldo    : <b>${current_bal:.2f} USD</b>\n"
                 f"PnL Hari : {pnl_sign}${abs(self.daily_pnl_usd):.2f} USD\n"
-                f"Status   : Bersiap mencari momentum sniper berikutnya."
+                f"Cooldown : 5 menit jeda pasca-profit (anti-pucuk)."
             )
             self.telegram.send(msg)
         else:
@@ -526,6 +531,19 @@ class AureusSniperBot:
             else:
                 score -= 5
 
+        # 5. Deteksi Konsolidasi/Sideways (ADX M5)
+        adx_m5 = self._calculate_adx(candles_m5, 14)
+        is_sideways = (adx_m5 < ADX_CHOP_THRESHOLD)
+
+        # 6. Room-to-Run (Plafon Resistensi & Lantai Support 20 Candle M5)
+        sub_20 = candles_m5[-20:]
+        recent_high_20 = max(c["high"] for c in sub_20)
+        recent_low_20 = min(c["low"] for c in sub_20)
+        cur_price = current_tick.get("ask" if score >= 0 else "bid", closes_m5[-1])
+
+        room_to_high = recent_high_20 - cur_price
+        room_to_low = cur_price - recent_low_20
+
         # Bound score -100 to 100
         score = max(-100, min(100, score))
         confidence = abs(score)
@@ -537,12 +555,28 @@ class AureusSniperBot:
             signal_type = "PASAR LIAR (TUNGGU)"
             direction = "WAIT"
             reasons.insert(0, f"Volatilitas ATR ({atr_m5:.1f}) melebihi batas 160! Tahan saldo Anda.")
+        elif is_sideways:
+            signal_type = "TUNGGU (PASAR SIDEWAYS)"
+            direction = "WAIT"
+            reasons.insert(0, f"Pasar Sideways / Choppy (ADX M5 {adx_m5:.1f} < {ADX_CHOP_THRESHOLD:.0f}). Menahan peluru.")
         elif score >= CONFIDENCE_THRESHOLD:
-            direction = "BUY"
-            signal_type = "BELI (BUY)"
+            # Check Room to Run for BUY (Anti-Pucuk)
+            if cur_price < recent_high_20 and room_to_high < MIN_ROOM_TO_RUN_POINTS:
+                signal_type = "TUNGGU (DEKAT RESISTENSI)"
+                direction = "WAIT"
+                reasons.insert(0, f"Beli Ditolak: Plafon Resisten M5 hanya +{room_to_high:.1f} pts (< {MIN_ROOM_TO_RUN_POINTS:.0f} pts). Menghindari beli di pucuk.")
+            else:
+                direction = "BUY"
+                signal_type = "BELI (BUY)"
         elif score <= -CONFIDENCE_THRESHOLD:
-            direction = "SELL"
-            signal_type = "JUAL (SELL)"
+            # Check Room to Run for SELL (Anti-Lembah)
+            if cur_price > recent_low_20 and room_to_low < MIN_ROOM_TO_RUN_POINTS:
+                signal_type = "TUNGGU (DEKAT SUPPORT)"
+                direction = "WAIT"
+                reasons.insert(0, f"Jual Ditolak: Lantai Support M5 hanya -{room_to_low:.1f} pts (< {MIN_ROOM_TO_RUN_POINTS:.0f} pts). Menghindari jual di lembah.")
+            else:
+                direction = "SELL"
+                signal_type = "JUAL (SELL)"
 
         # Update latest analysis for Web Dashboard (SSOT)
         self.latest_analysis = {
@@ -552,12 +586,20 @@ class AureusSniperBot:
             "confidencePercent": confidence,
             "signal": signal_type,
             "atr_m5": round(atr_m5, 2),
+            "adx_m5": adx_m5,
+            "room_to_high": round(room_to_high, 1),
+            "room_to_low": round(room_to_low, 1),
             "reasons": reasons if reasons else ["Menunggu konfluensi setup valid"],
             "updated_at": int(time.time()),
             "is_paused": self.is_paused,
             "daily_pnl": round(self.daily_pnl_usd, 2),
             "circuit_breaker": self.circuit_breaker_active,
         }
+
+        # Check Active Cooldowns before MT5 Execution
+        now = time.time()
+        in_win_cooldown = (now - self.last_win_time < WIN_COOLDOWN_SECONDS)
+        in_loss_cooldown = (now - self.last_loss_time < COOLDOWN_SECONDS)
 
         # Eksekusi Order Otomatis jika terkonfirmasi dan bot TIDAK DIJEDA
         if direction in ["BUY", "SELL"]:
@@ -567,11 +609,15 @@ class AureusSniperBot:
             if self.circuit_breaker_active:
                 logger.info(f"Sinyal {direction} terdeteksi, tetapi Circuit Breaker aktif. Order ditahan.")
                 return
-            if time.time() - self.last_loss_time < COOLDOWN_SECONDS:
-                logger.info(f"Sinyal {direction} terdeteksi, tetapi dalam masa jeda cut loss. Order ditahan.")
+            if in_win_cooldown:
+                rem = int(WIN_COOLDOWN_SECONDS - (now - self.last_win_time))
+                logger.info(f"Sinyal {direction} terdeteksi, tetapi dalam jeda pasca-profit (sisa {rem}s). Menghindari beli di pucuk.")
+                return
+            if in_loss_cooldown:
+                rem = int(COOLDOWN_SECONDS - (now - self.last_loss_time))
+                logger.info(f"Sinyal {direction} terdeteksi, tetapi dalam masa jeda cut loss (sisa {rem}s). Order ditahan.")
                 return
 
-            cur_price = current_tick.get("ask" if direction == "BUY" else "bid", closes_m5[-1])
             self._execute_order(direction, cur_price, reasons, acc_info)
 
     def _execute_order(self, direction: str, current_price: float, reasons: list, acc_info: dict):
@@ -687,15 +733,73 @@ class AureusSniperBot:
             return "BULLISH"
         return "BEARISH"
 
+    def _calculate_adx(self, candles: list, period: int = 14) -> float:
+        """Calculate 14-period Wilder's ADX on candles."""
+        if len(candles) < period * 2:
+            return 25.0
+        highs = [c["high"] for c in candles]
+        lows = [c["low"] for c in candles]
+        closes = [c["close"] for c in candles]
+
+        tr_list = []
+        plus_dm = []
+        minus_dm = []
+
+        for i in range(1, len(candles)):
+            h, l, prev_c = highs[i], lows[i], closes[i - 1]
+            tr = max(h - l, abs(h - prev_c), abs(l - prev_c))
+            tr_list.append(tr)
+
+            up_move = h - highs[i - 1]
+            down_move = lows[i - 1] - l
+
+            if up_move > down_move and up_move > 0:
+                plus_dm.append(up_move)
+            else:
+                plus_dm.append(0.0)
+
+            if down_move > up_move and down_move > 0:
+                minus_dm.append(down_move)
+            else:
+                minus_dm.append(0.0)
+
+        if len(tr_list) < period:
+            return 25.0
+
+        tr_smooth = sum(tr_list[:period])
+        plus_smooth = sum(plus_dm[:period])
+        minus_smooth = sum(minus_dm[:period])
+
+        dx_list = []
+        for i in range(period, len(tr_list)):
+            tr_smooth = tr_smooth - (tr_smooth / period) + tr_list[i]
+            plus_smooth = plus_smooth - (plus_smooth / period) + plus_dm[i]
+            minus_smooth = minus_smooth - (minus_smooth / period) + minus_dm[i]
+
+            plus_di = 100.0 * (plus_smooth / tr_smooth) if tr_smooth > 0 else 0.0
+            minus_di = 100.0 * (minus_smooth / tr_smooth) if tr_smooth > 0 else 0.0
+            di_sum = plus_di + minus_di
+            dx = 100.0 * (abs(plus_di - minus_di) / di_sum) if di_sum > 0 else 0.0
+            dx_list.append(dx)
+
+        if not dx_list:
+            return 25.0
+
+        adx = sum(dx_list[:period]) / min(len(dx_list), period)
+        for i in range(period, len(dx_list)):
+            adx = (adx * (period - 1) + dx_list[i]) / period
+
+        return round(adx, 1)
+
     def get_status_text(self) -> str:
         pos = self._get_open_position()
         if pos:
             pnl = float(pos.profit)
             sign = "+" if pnl >= 0 else "-"
             stage_desc = "Belum Terkunci"
-            if self.ladder_stage == 1: stage_desc = "Kunci 50% (+$0.60)"
-            elif self.ladder_stage == 2: stage_desc = "Kunci 75% (+$0.90)"
-            elif self.ladder_stage == 3: stage_desc = "Kunci 100% (+$1.20)"
+            if self.ladder_stage == 1: stage_desc = "Tangga 1 (+$0.30 Terkunci)"
+            elif self.ladder_stage == 2: stage_desc = "Tangga 2 (+$0.60 Terkunci)"
+            elif self.ladder_stage == 3: stage_desc = "Tangga 3 (+$1.00 Terkunci)"
 
             return (
                 f"📊 <b>STATUS POSISI AKTIF</b>\n"

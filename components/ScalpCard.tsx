@@ -72,7 +72,13 @@ export default function ScalpCard({ signal }: ScalpCardProps) {
                   ? "⏸️ Bot Sedang Dijeda dari Telegram (Order Dikunci)"
                   : signal.signal === "PASAR LIAR (TUNGGU)"
                   ? "⚠️ Volatilitas Pasar Sedang Liar — Tahan Saldo Anda"
-                  : "Menunggu Konfluensi Sinyal Terverifikasi (>= 55%)"}
+                  : signal.signal === "TUNGGU (PASAR SIDEWAYS)"
+                  ? "⏸️ Pasar Sideways / Choppy — Tahan Peluru"
+                  : signal.signal === "TUNGGU (DEKAT RESISTENSI)"
+                  ? "🛡️ Beli Ditolak — Mencegah Beli di Pucuk Resistensi"
+                  : signal.signal === "TUNGGU (DEKAT SUPPORT)"
+                  ? "🛡️ Jual Ditolak — Mencegah Jual di Lembah Support"
+                  : "Menunggu Konfluensi Sinyal Terverifikasi (>= 65%)"}
               </h4>
               <p className="text-sm text-zinc-300 mt-1.5 leading-relaxed font-medium">
                 {signal.reasons.join(" • ")}
@@ -88,7 +94,10 @@ export default function ScalpCard({ signal }: ScalpCardProps) {
             </div>
             <ul className="list-disc list-inside space-y-1.5 text-zinc-300 leading-relaxed text-xs">
               <li>
-                <strong className="text-zinc-100">Eksekusi Otomatis:</strong> Saat keyakinan mencapai <strong>&ge; 55%</strong>, bot langsung membuka order 0.01 lot di Exness Real tanpa intervensi manual.
+                <strong className="text-zinc-100">Eksekusi Otomatis:</strong> Saat keyakinan mencapai <strong>&ge; 65%</strong> dan ruang gerak aman (&ge; 80 poin), bot membuka order 0.01 lot di Exness Real.
+              </li>
+              <li>
+                <strong className="text-zinc-100">Proteksi Anti-Pucuk & Anti-Lembah:</strong> Dilarang BUY dekat plafon resistensi dan dilarang SELL dekat lantai support.
               </li>
               <li>
                 <strong className="text-zinc-100">Proteksi Tangga Profit:</strong> Order dikawal bertingkat (+60 poin lock +$0.30, +100 poin lock +$0.60, +140 poin lock +$1.00 & lepas TP2).

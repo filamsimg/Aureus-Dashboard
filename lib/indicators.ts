@@ -41,6 +41,7 @@ export interface TechnicalSnapshot {
   supertrendValue: number;
   ribbon: "BULLISH_ALIGNMENT" | "BEARISH_ALIGNMENT" | "MIXED";
   candlePattern: "BULLISH_PIN_BAR" | "BEARISH_PIN_BAR" | "NORMAL";
+  adx: number;
   sr: SupportResistance;
   smc: SmcStructures;
 }
@@ -281,6 +282,7 @@ export function analyzeCandles(candles: Candle[]): TechnicalSnapshot | null {
     macdSignal: Number(signalLine[last].toFixed(2)),
     macdHist: Number(hist[last].toFixed(2)),
     atr: Number(atr[last].toFixed(2)),
+    adx: calculateADX(candles, 14),
     supertrend: direction[last],
     supertrendValue: Number(st[last].toFixed(2)),
     ribbon,
@@ -288,4 +290,48 @@ export function analyzeCandles(candles: Candle[]): TechnicalSnapshot | null {
     sr: findSupportResistance(candles, 30),
     smc: detectSMC(candles),
   };
+}
+
+export function calculateADX(candles: Candle[], period: number = 14): number {
+  if (candles.length < period * 2) return 25.0;
+  const n = candles.length;
+  const trs: number[] = [];
+  const plusDm: number[] = [];
+  const minusDm: number[] = [];
+
+  for (let i = 1; i < n; i++) {
+    const h = candles[i].high;
+    const l = candles[i].low;
+    const prevC = candles[i - 1].close;
+    trs.push(Math.max(h - l, Math.abs(h - prevC), Math.abs(l - prevC)));
+
+    const upMove = h - candles[i - 1].high;
+    const downMove = candles[i - 1].low - l;
+
+    plusDm.push(upMove > downMove && upMove > 0 ? upMove : 0);
+    minusDm.push(downMove > upMove && downMove > 0 ? downMove : 0);
+  }
+
+  let trSmooth = trs.slice(0, period).reduce((a, b) => a + b, 0);
+  let plusSmooth = plusDm.slice(0, period).reduce((a, b) => a + b, 0);
+  let minusSmooth = minusDm.slice(0, period).reduce((a, b) => a + b, 0);
+
+  const dxList: number[] = [];
+  for (let i = period; i < trs.length; i++) {
+    trSmooth = trSmooth - trSmooth / period + trs[i];
+    plusSmooth = plusSmooth - plusSmooth / period + plusDm[i];
+    minusSmooth = minusSmooth - minusSmooth / period + minusDm[i];
+
+    const plusDi = trSmooth > 0 ? (100 * plusSmooth) / trSmooth : 0;
+    const minusDi = trSmooth > 0 ? (100 * minusSmooth) / trSmooth : 0;
+    const sumDi = plusDi + minusDi;
+    dxList.push(sumDi > 0 ? (100 * Math.abs(plusDi - minusDi)) / sumDi : 0);
+  }
+
+  if (dxList.length === 0) return 25.0;
+  let adx = dxList.slice(0, period).reduce((a, b) => a + b, 0) / Math.min(dxList.length, period);
+  for (let i = period; i < dxList.length; i++) {
+    adx = (adx * (period - 1) + dxList[i]) / period;
+  }
+  return Number(adx.toFixed(1));
 }
