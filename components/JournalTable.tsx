@@ -40,7 +40,66 @@ export default function JournalTable({ trades, stats }: JournalTableProps) {
     return { startOfToday: today, sevenDaysAgo: week };
   }, []);
 
-  // Filtered trades
+  // Filter trades based on active time period (independent of source filter)
+  const timeFilteredTrades = useMemo(() => {
+    return trades.filter((t) => {
+      const tradeTime = new Date(t.openedAt).getTime();
+      if (timeFilter === "TODAY" && tradeTime < startOfToday) return false;
+      if (timeFilter === "WEEK" && tradeTime < sevenDaysAgo) return false;
+      return true;
+    });
+  }, [trades, timeFilter, startOfToday, sevenDaysAgo]);
+
+  // Compute dynamic KPI stats reflecting the selected time filter
+  const activeStats = useMemo(() => {
+    if (timeFilter === "ALL") {
+      return stats;
+    }
+
+    const closed = timeFilteredTrades.filter((t) => t.pnlUsd !== 0);
+    const wins = closed.filter((t) => t.pnlUsd > 0).length;
+    const losses = closed.filter((t) => t.pnlUsd < 0).length;
+    const totalPnl = closed.reduce((acc, t) => acc + t.pnlUsd, 0);
+
+    const botTrades = closed.filter(
+      (t) => t.source === "BOT" || t.notes?.includes("Aureus") || t.notes?.includes("Magic #778898")
+    );
+    const botWins = botTrades.filter((t) => t.pnlUsd > 0).length;
+    const botLosses = botTrades.filter((t) => t.pnlUsd < 0).length;
+    const botPnlUsd = Number(botTrades.reduce((acc, t) => acc + t.pnlUsd, 0).toFixed(2));
+    const botWinRatePercent =
+      botTrades.length > 0 ? Number(((botWins / botTrades.length) * 100).toFixed(1)) : 0;
+
+    const manualTrades = closed.filter(
+      (t) => !(t.source === "BOT" || t.notes?.includes("Aureus") || t.notes?.includes("Magic #778898"))
+    );
+    const manualWins = manualTrades.filter((t) => t.pnlUsd > 0).length;
+    const manualLosses = manualTrades.filter((t) => t.pnlUsd < 0).length;
+    const manualPnlUsd = Number(manualTrades.reduce((acc, t) => acc + t.pnlUsd, 0).toFixed(2));
+    const manualWinRatePercent =
+      manualTrades.length > 0 ? Number(((manualWins / manualTrades.length) * 100).toFixed(1)) : 0;
+
+    return {
+      ...stats,
+      totalTrades: closed.length,
+      wins,
+      losses,
+      winRatePercent: closed.length > 0 ? Number(((wins / closed.length) * 100).toFixed(1)) : 0,
+      totalPnlUsd: Number(totalPnl.toFixed(2)),
+      botPnlUsd,
+      botWins,
+      botLosses,
+      botWinRatePercent,
+      manualPnlUsd,
+      manualWins,
+      manualLosses,
+      manualWinRatePercent,
+    };
+  }, [timeFilter, timeFilteredTrades, stats]);
+
+  const periodLabel = timeFilter === "TODAY" ? "Hari Ini" : timeFilter === "WEEK" ? "7 Hari" : "Semua Waktu";
+
+  // Filtered trades (Combines Source + Time for Table Rows)
   const filteredTrades = useMemo(() => {
     return trades.filter((t) => {
       // 1. Source Filter
@@ -84,7 +143,7 @@ export default function JournalTable({ trades, stats }: JournalTableProps) {
           </span>
         </div>
         <span className="text-[11px] text-zinc-400 bg-zinc-900 px-3 py-1 rounded-full border border-zinc-800">
-          Otomatis sinkron dari server VPS setiap 5 detik
+          Otomatis sinkron dari server VPS • Data Live
         </span>
       </div>
 
@@ -94,27 +153,27 @@ export default function JournalTable({ trades, stats }: JournalTableProps) {
         <div className="bg-zinc-900/80 p-3.5 rounded-xl border border-zinc-800/70 flex flex-col justify-between">
           <div className="flex items-center justify-between text-zinc-400 mb-1">
             <span className="font-semibold flex items-center gap-1.5">
-              <DollarSign className="w-3.5 h-3.5 text-emerald-400" /> Total Akumulasi PnL
+              <DollarSign className="w-3.5 h-3.5 text-emerald-400" /> Total PnL ({periodLabel})
             </span>
-            <span className="text-[10px] bg-zinc-800 px-2 py-0.5 rounded-full font-bold text-zinc-300">
-              {stats.totalTrades} Trade
+            <span className="text-[10px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold">
+              {activeStats.totalTrades} Trade
             </span>
           </div>
           <div className="flex items-baseline justify-between mt-1">
             <span
               className={`text-lg font-black tabular-nums ${
-                stats.totalPnlUsd >= 0 ? "text-emerald-400" : "text-rose-400"
+                activeStats.totalPnlUsd >= 0 ? "text-emerald-400" : "text-rose-400"
               }`}
             >
-              {stats.totalPnlUsd >= 0 ? "+" : ""}${stats.totalPnlUsd.toFixed(2)} USD
+              {activeStats.totalPnlUsd >= 0 ? "+" : ""}${activeStats.totalPnlUsd.toFixed(2)} USD
             </span>
             <span className="text-[11px] font-bold text-emerald-400">
-              Win Rate: {stats.winRatePercent}%
+              Win Rate: {activeStats.winRatePercent}%
             </span>
           </div>
           <div className="text-[10px] text-zinc-500 mt-1 flex justify-between">
-            <span>{stats.wins} Menang</span>
-            <span>{stats.losses} Rugi</span>
+            <span>{activeStats.wins} Menang</span>
+            <span>{activeStats.losses} Rugi</span>
           </div>
         </div>
 
@@ -122,7 +181,7 @@ export default function JournalTable({ trades, stats }: JournalTableProps) {
         <div className="bg-zinc-900/80 p-3.5 rounded-xl border border-cyan-500/20 flex flex-col justify-between">
           <div className="flex items-center justify-between text-zinc-400 mb-1">
             <span className="font-semibold flex items-center gap-1.5 text-cyan-300">
-              <Bot className="w-3.5 h-3.5 text-cyan-400" /> Hasil Bot Otonom
+              <Bot className="w-3.5 h-3.5 text-cyan-400" /> Bot ({periodLabel})
             </span>
             <span className="text-[10px] bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 px-2 py-0.5 rounded-full font-bold">
               Magic #778898
@@ -131,18 +190,18 @@ export default function JournalTable({ trades, stats }: JournalTableProps) {
           <div className="flex items-baseline justify-between mt-1">
             <span
               className={`text-lg font-black tabular-nums ${
-                (stats.botPnlUsd || 0) >= 0 ? "text-emerald-400" : "text-rose-400"
+                (activeStats.botPnlUsd || 0) >= 0 ? "text-emerald-400" : "text-rose-400"
               }`}
             >
-              {(stats.botPnlUsd || 0) >= 0 ? "+" : ""}${(stats.botPnlUsd || 0).toFixed(2)} USD
+              {(activeStats.botPnlUsd || 0) >= 0 ? "+" : ""}${(activeStats.botPnlUsd || 0).toFixed(2)} USD
             </span>
             <span className="text-[11px] font-bold text-cyan-300">
-              Win Rate: {stats.botWinRatePercent || 0}%
+              Win Rate: {activeStats.botWinRatePercent || 0}%
             </span>
           </div>
           <div className="text-[10px] text-zinc-500 mt-1 flex justify-between">
-            <span>{stats.botWins || 0} Menang</span>
-            <span>{stats.botLosses || 0} Rugi</span>
+            <span>{activeStats.botWins || 0} Menang</span>
+            <span>{activeStats.botLosses || 0} Rugi</span>
           </div>
         </div>
 
@@ -150,7 +209,7 @@ export default function JournalTable({ trades, stats }: JournalTableProps) {
         <div className="bg-zinc-900/80 p-3.5 rounded-xl border border-zinc-800/70 flex flex-col justify-between">
           <div className="flex items-center justify-between text-zinc-400 mb-1">
             <span className="font-semibold flex items-center gap-1.5 text-zinc-300">
-              <User className="w-3.5 h-3.5 text-zinc-400" /> Hasil Manual MT5
+              <User className="w-3.5 h-3.5 text-zinc-400" /> Manual ({periodLabel})
             </span>
             <span className="text-[10px] bg-zinc-800 px-2 py-0.5 rounded-full font-bold text-zinc-400">
               User Trade
@@ -159,18 +218,18 @@ export default function JournalTable({ trades, stats }: JournalTableProps) {
           <div className="flex items-baseline justify-between mt-1">
             <span
               className={`text-lg font-black tabular-nums ${
-                (stats.manualPnlUsd || 0) >= 0 ? "text-emerald-400" : "text-rose-400"
+                (activeStats.manualPnlUsd || 0) >= 0 ? "text-emerald-400" : "text-rose-400"
               }`}
             >
-              {(stats.manualPnlUsd || 0) >= 0 ? "+" : ""}${(stats.manualPnlUsd || 0).toFixed(2)} USD
+              {(activeStats.manualPnlUsd || 0) >= 0 ? "+" : ""}${(activeStats.manualPnlUsd || 0).toFixed(2)} USD
             </span>
             <span className="text-[11px] font-bold text-zinc-300">
-              Win Rate: {stats.manualWinRatePercent || 0}%
+              Win Rate: {activeStats.manualWinRatePercent || 0}%
             </span>
           </div>
           <div className="text-[10px] text-zinc-500 mt-1 flex justify-between">
-            <span>{stats.manualWins || 0} Menang</span>
-            <span>{stats.manualLosses || 0} Rugi</span>
+            <span>{activeStats.manualWins || 0} Menang</span>
+            <span>{activeStats.manualLosses || 0} Rugi</span>
           </div>
         </div>
 
@@ -180,12 +239,23 @@ export default function JournalTable({ trades, stats }: JournalTableProps) {
             <span className="font-semibold flex items-center gap-1.5 text-zinc-300">
               <Calendar className="w-3.5 h-3.5 text-amber-400" /> Breakdown Waktu
             </span>
-            <span className="text-[10px] bg-zinc-800 px-2 py-0.5 rounded-full font-bold text-zinc-400">
-              Agregat MT5
+            <span className="text-[10px] bg-zinc-800 px-2 py-0.5 rounded-full font-bold text-amber-300">
+              Aktif: {periodLabel}
             </span>
           </div>
           <div className="space-y-1 mt-1 text-[11px]">
-            <div className="flex justify-between items-center">
+            <button
+              onClick={() => {
+                setTimeFilter("TODAY");
+                setCurrentPage(1);
+              }}
+              className={`w-full flex justify-between items-center px-2 py-1 rounded-lg transition ${
+                timeFilter === "TODAY"
+                  ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                  : "hover:bg-zinc-800/80 text-zinc-300"
+              }`}
+              title="Klik untuk filter Hari Ini"
+            >
               <span className="text-zinc-400">Hari Ini:</span>
               <strong
                 className={`font-black tabular-nums ${
@@ -195,8 +265,19 @@ export default function JournalTable({ trades, stats }: JournalTableProps) {
                 {(stats.todayPnlUsd || 0) >= 0 ? "+" : ""}${(stats.todayPnlUsd || 0).toFixed(2)} USD
                 <span className="text-zinc-500 text-[10px] font-normal ml-1">({stats.todayTradesCount || 0})</span>
               </strong>
-            </div>
-            <div className="flex justify-between items-center">
+            </button>
+            <button
+              onClick={() => {
+                setTimeFilter("WEEK");
+                setCurrentPage(1);
+              }}
+              className={`w-full flex justify-between items-center px-2 py-1 rounded-lg transition ${
+                timeFilter === "WEEK"
+                  ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                  : "hover:bg-zinc-800/80 text-zinc-300"
+              }`}
+              title="Klik untuk filter 7 Hari Terakhir"
+            >
               <span className="text-zinc-400">7 Hari:</span>
               <strong
                 className={`font-black tabular-nums ${
@@ -206,7 +287,7 @@ export default function JournalTable({ trades, stats }: JournalTableProps) {
                 {(stats.weeklyPnlUsd || 0) >= 0 ? "+" : ""}${(stats.weeklyPnlUsd || 0).toFixed(2)} USD
                 <span className="text-zinc-500 text-[10px] font-normal ml-1">({stats.weeklyTradesCount || 0})</span>
               </strong>
-            </div>
+            </button>
           </div>
         </div>
       </div>

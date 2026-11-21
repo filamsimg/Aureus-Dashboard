@@ -53,10 +53,11 @@ export default function DashboardPage() {
 
   const [livePrice, setLivePrice] = useState<number>(60000);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
-  const [countdown, setCountdown] = useState<number>(5);
+  const [countdown, setCountdown] = useState<number>(3);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   const lastSignalDirRef = useRef<string | null>(null);
+  const cycleCountRef = useRef<number>(0);
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
@@ -194,11 +195,17 @@ export default function DashboardPage() {
     const timer = setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
+          // Fast Loop (3 Detik): Grafik Candlestick & Radar Analisa Sinyal
           runAnalysis();
           loadCandles(timeframe);
-          fetchAccount();
-          loadJournal();
-          return 5;
+
+          // Passive Loop (30 Detik): Saldo Akun & Riwayat Jurnal Deals (Hemat Kuota Vercel 80%)
+          cycleCountRef.current += 1;
+          if (cycleCountRef.current % 10 === 0) {
+            fetchAccount();
+            loadJournal();
+          }
+          return 3;
         }
         return prev - 1;
       });
@@ -292,8 +299,8 @@ export default function DashboardPage() {
                 loadCandles(timeframe);
                 fetchAccount();
                 loadJournal();
-                setCountdown(5);
-                showToast("Data pasar & riwayat diperbarui!");
+                setCountdown(3);
+                showToast("Data pasar & saldo diperbarui!");
               }}
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border border-zinc-800/80 text-xs sm:text-sm font-semibold transition active:scale-95"
               title="Klik untuk Refresh sekarang"
