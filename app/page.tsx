@@ -424,8 +424,12 @@ export default function DashboardPage() {
             <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold text-zinc-300">Grafik Candlestick Real-time</span>
-                <span className="text-[10px] text-zinc-500 bg-zinc-900 px-2 py-0.5 rounded-full border border-zinc-800">
-                  Gate.io / HTX Live Feed
+                <span className={`text-[10px] px-2 py-0.5 rounded-full border ${
+                  vpsConnected 
+                    ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20 font-medium" 
+                    : "text-zinc-500 bg-zinc-900 border-zinc-800"
+                }`}>
+                  {vpsConnected ? "Exness MT5 Live (100% Akurat)" : "Public Standby Feed"}
                 </span>
               </div>
 

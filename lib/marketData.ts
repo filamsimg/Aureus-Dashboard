@@ -31,6 +31,39 @@ export async function fetchLiveTicker(): Promise<{
   change24h: number;
   source: string;
 }> {
+  // 1. PRIORITY 1: Fetch exact live tick directly from Exness MT5 via VPS Bridge
+  const vpsUrl = process.env.VPS_BRIDGE_URL || "http://109.111.52.163:8000";
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1200); // 1.2s fast check
+    const vpsRes = await fetch(`${vpsUrl}/api/price`, {
+      signal: controller.signal,
+      next: { revalidate: 1 },
+    });
+    clearTimeout(timeout);
+
+    if (vpsRes.ok) {
+      const vpsData = await vpsRes.json();
+      if (vpsData && vpsData.connected && vpsData.bid) {
+        const bid = Number(vpsData.bid);
+        const ask = Number(vpsData.ask || bid);
+        const last = Number(vpsData.last || bid);
+        return {
+          price: last,
+          bid: bid,
+          ask: ask,
+          high24h: last + 250,
+          low24h: last - 250,
+          change24h: 0,
+          source: `Exness MT5 Real-time (${vpsData.symbol || "BTCUSDm"})`,
+        };
+      }
+    }
+  } catch (err) {
+    // VPS offline or not yet started - fall through to public crypto feed
+  }
+
+  // 2. PRIORITY 2: Public Spot Feed (Gate.io / Binance / HTX)
   try {
     const res = await fetch("https://api.gateio.ws/api/v4/spot/tickers?currency_pair=BTC_USDT", {
       next: { revalidate: 2 },
@@ -49,7 +82,7 @@ export async function fetchLiveTicker(): Promise<{
           high24h: Number(parseFloat(t.high_24h || "0").toFixed(2)),
           low24h: Number(parseFloat(t.low_24h || "0").toFixed(2)),
           change24h: Number(parseFloat(t.change_percentage || "0").toFixed(2)),
-          source: "Gate.io Public Feed",
+          source: "Gate.io Public Feed (Standby)",
         };
       }
     }
@@ -93,6 +126,29 @@ export async function fetchLiveTicker(): Promise<{
 
 export async function fetchCandles(timeframe: string = "M5", limit: number = 60): Promise<Candle[]> {
   const tf = timeframe.toUpperCase();
+
+  // 1. PRIORITY 1: Fetch exact candles directly from Exness MT5 on VPS
+  const vpsUrl = process.env.VPS_BRIDGE_URL || "http://109.111.52.163:8000";
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1500); // 1.5s fast check
+    const vpsRes = await fetch(`${vpsUrl}/api/candles?tf=${tf}&limit=${limit}`, {
+      signal: controller.signal,
+      next: { revalidate: 2 },
+    });
+    clearTimeout(timeout);
+
+    if (vpsRes.ok) {
+      const data = await vpsRes.json();
+      if (data && data.connected && Array.isArray(data.candles) && data.candles.length > 0) {
+        return data.candles;
+      }
+    }
+  } catch (err) {
+    // Fall through to public feed
+  }
+
+  // 2. PRIORITY 2: Gate.io Candlesticks
   const gateInterval = GATEIO_MAP[tf] || "5m";
 
   try {

@@ -141,9 +141,18 @@ class BalanceHandler(BaseHTTPRequestHandler):
         if not MT5_AVAILABLE or not mt5.initialize():
             return {"connected": False, "candles": []}
 
+        # Parse timeframe from query if present
+        tf_code = mt5.TIMEFRAME_M5
+        if "tf=M1" in self.path or "tf=1" in self.path:
+            tf_code = mt5.TIMEFRAME_M1
+        elif "tf=M15" in self.path or "tf=15" in self.path:
+            tf_code = mt5.TIMEFRAME_M15
+        elif "tf=H1" in self.path or "tf=60" in self.path:
+            tf_code = mt5.TIMEFRAME_H1
+
         for sym in ["BTCUSDm", "BTCUSDc", "BTCUSD", "BTCUSDT"]:
             if mt5.symbol_select(sym, True):
-                rates = mt5.copy_rates_from_pos(sym, mt5.TIMEFRAME_M5, 0, 70)
+                rates = mt5.copy_rates_from_pos(sym, tf_code, 0, 70)
                 if rates is not None and len(rates) > 0:
                     candles = []
                     for r in rates:
