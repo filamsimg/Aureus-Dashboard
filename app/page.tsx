@@ -13,7 +13,6 @@ import {
   Volume2,
   VolumeX,
   RefreshCw,
-  Send,
   Bot,
   ShieldCheck,
   TrendingUp,
@@ -273,18 +272,6 @@ export default function DashboardPage() {
 
           {/* Right Controls */}
           <div className="flex items-center gap-2">
-            {/* Telegram Master Control */}
-            <a
-              href="https://t.me/AureusAITraderBot"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-xs sm:text-sm font-bold transition active:scale-95"
-              title="Buka Telegram Bot (@AureusAITraderBot) untuk perintah /start dan /stop"
-            >
-              <Send className="w-3.5 h-3.5 text-cyan-400" />
-              <span className="hidden sm:inline">Telegram Bot</span>
-            </a>
-
             {/* Audio Toggle */}
             <button
               onClick={() => {
@@ -329,7 +316,7 @@ export default function DashboardPage() {
           <div className="flex items-center gap-3">
             <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></div>
             <span className="font-semibold text-zinc-200">
-              <strong className="text-emerald-400">Mode Otonom 24/7 Aktif:</strong> Bot memindai BTCUSDm di VPS Exness Real • Kendali satu pintu via Telegram <strong>@AureusAITraderBot</strong>
+              <strong className="text-emerald-400">Mode Otonom 24/7 Aktif:</strong> Bot memindai BTCUSDm di VPS Exness Real • Eksekusi Mandiri Terukur (0ms Latency)
             </span>
           </div>
           <div className="text-xs text-zinc-300 bg-zinc-900 px-3 py-1 rounded-full border border-zinc-800 font-bold">
@@ -432,8 +419,8 @@ export default function DashboardPage() {
             </div>
 
             <div className="text-xs text-zinc-400 mt-3 pt-3 border-t border-zinc-800/70 flex items-center justify-between">
-              <span>Kendali Master: <strong>@AureusAITraderBot</strong></span>
-              <span className="text-emerald-400 font-bold">{signal?.isPaused ? "Ketik /start di Telegram" : "Aktif Memindai 24/7"}</span>
+              <span>Proteksi Tangga: <strong>Otomatis Mengawal Saldo</strong></span>
+              <span className="text-emerald-400 font-bold">{signal?.isPaused ? "Status: Dijeda" : "Aktif Memindai 24/7"}</span>
             </div>
           </div>
         </div>

@@ -94,20 +94,20 @@ export default function ScalpCard({ signal }: ScalpCardProps) {
                 <strong className="text-zinc-100">Proteksi Tangga Profit:</strong> Order dikawal bertingkat (+100 poin lock 50%, +110 poin lock 75%, +120 poin lock 100% TP1).
               </li>
               <li>
-                <strong className="text-zinc-100">Kendali Satu Pintu Telegram:</strong> Gunakan <code>/start</code> untuk mengaktifkan atau <code>/stop</code> untuk menjeda kapan saja dari HP.
+                <strong className="text-zinc-100">Kendali Terpusat:</strong> Sistem beroperasi mandiri di VPS Exness dengan proteksi akun terukur.
               </li>
             </ul>
           </div>
         </div>
 
-        {/* Telegram Quick Status Footer */}
+        {/* Status Footer */}
         <div className="pt-4 mt-3 border-t border-zinc-800/70 flex items-center justify-between text-xs text-zinc-400">
           <div className="flex items-center gap-2">
-            <Send className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Kendali Master via Telegram: <strong>@AureusAITraderBot</strong></span>
+            <Bot className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Sistem Otonom 24/7: <strong>Eksekusi Mandiri Terproteksi</strong></span>
           </div>
           <span className="font-semibold text-zinc-300">
-            {isPaused ? "Ketik /start di Telegram" : "Siaga 24/7 di VPS"}
+            {isPaused ? "Status: Dijeda" : "Siaga 24/7 di VPS"}
           </span>
         </div>
       </div>
