@@ -1,7 +1,8 @@
 """
-Aureus VPS Micro-Bridge (Python) - Ultra Fast Resilient Version with Auto-Login
+Aureus VPS Micro-Bridge (Python) - Pure Read-Only Mode
 Runs on Windows VPS (109.111.52.163) alongside MetaTrader 5.
-Automatically connects to Exness Real USD Account 268119731.
+Directly reads live balance and ticks from the active MT5 window.
+Zero login calls, zero extra accounts, 100% read-only.
 """
 
 import sys
@@ -32,11 +33,6 @@ logger = logging.getLogger("VPSBridge")
 
 PORT = 8000
 
-# Target Exness Account Credentials
-MT5_LOGIN = 268119731
-MT5_PASSWORD = "Filamss"
-MT5_SERVERS = ["Exness-MT5Real39", "Exness_MT5Real39", "Exness-Real39", "Exness-Real"]
-
 # Global cached state to guarantee 0ms response time
 LATEST_STATE = {
     "account": {
@@ -61,9 +57,9 @@ LATEST_STATE = {
 }
 
 def mt5_worker_loop():
-    """Background thread that continuously polls MT5 so HTTP requests never block."""
+    """Background thread that reads active MT5 data. Never calls mt5.login()."""
     global LATEST_STATE
-    logger.info("Worker thread MT5 dimulai. Menghubungkan ke terminal...")
+    logger.info("Worker MT5 dimulai. Membaca terminal MT5 yang sedang aktif...")
     
     mt5_initialized = False
     last_print_time = 0
@@ -71,7 +67,7 @@ def mt5_worker_loop():
     while True:
         try:
             if not MT5_AVAILABLE:
-                logger.error("Modul MetaTrader5 tidak ditemukan! Pastikan 'pip install MetaTrader5' sudah terpasang.")
+                logger.error("Modul MetaTrader5 tidak ditemukan! Pasang dengan 'pip install MetaTrader5'.")
                 time.sleep(5)
                 continue
 
@@ -83,34 +79,26 @@ def mt5_worker_loop():
                     mt5_initialized = mt5.initialize()
                 
                 if mt5_initialized:
-                    logger.info(">>> MetaTrader 5 IPC Terkoneksi!")
+                    logger.info(">>> Terhubung ke MetaTrader 5 GUI!")
                 else:
                     err = mt5.last_error()
                     LATEST_STATE["account"]["error"] = f"Menunggu MT5 GUI: {err}"
                     time.sleep(2)
                     continue
 
-            # 1. Pastikan terhubung ke akun 268119731
+            # 1. Baca langsung akun yang sedang login di jendela MT5 (Read-Only)
             acc = mt5.account_info()
-            if not acc or acc.login != MT5_LOGIN:
-                for srv in MT5_SERVERS:
-                    logger.info(f"Mencoba login ke {MT5_LOGIN} di server {srv}...")
-                    auth = mt5.login(login=MT5_LOGIN, password=MT5_PASSWORD, server=srv)
-                    if auth:
-                        logger.info(f">>> BERHASIL LOGIN MT5: Akun {MT5_LOGIN} di server {srv}!")
-                        break
-                acc = mt5.account_info()
-
             if acc:
                 d = acc._asdict()
                 bal = round(float(d.get("balance", 20.0)), 2)
                 eq = round(float(d.get("equity", 20.0)), 2)
                 cur = d.get("currency", "USD")
                 srv = d.get("server", "Exness-MT5Real39")
+                login_id = d.get("login")
 
                 LATEST_STATE["account"] = {
                     "connected": True,
-                    "login": d.get("login"),
+                    "login": login_id,
                     "server": srv,
                     "balance": bal,
                     "equity": eq,
@@ -120,7 +108,8 @@ def mt5_worker_loop():
                     "company": d.get("company", "Exness")
                 }
             else:
-                LATEST_STATE["account"]["error"] = "Silakan login akun di jendela MT5!"
+                LATEST_STATE["account"]["connected"] = False
+                LATEST_STATE["account"]["error"] = "Pastikan MT5 sudah terbuka dan login ke akun Exness."
 
             # 2. Ambil data Tick real-time untuk BTCUSDm
             for sym in ["BTCUSDm", "BTCUSD", "BTCUSDc", "BTCUSDT"]:
@@ -163,7 +152,8 @@ def mt5_worker_loop():
                     acc_info = LATEST_STATE["account"]
                     tick_info = LATEST_STATE["tick"]
                     logger.info(
-                        f"[LIVE MT5] Saldo: {acc_info['currency']} {acc_info['balance']} | "
+                        f"[LIVE MT5] Login: #{acc_info['login']} | "
+                        f"Saldo: {acc_info['currency']} {acc_info['balance']} | "
                         f"Equity: {acc_info['equity']} | "
                         f"{tick_info.get('symbol')}: {tick_info.get('bid')} / {tick_info.get('ask')}"
                     )
@@ -234,8 +224,8 @@ def run():
     print("=" * 60)
     print("      AUREUS AI TRADER - MT5 LIVE EXNESS BRIDGE")
     print("=" * 60)
+    print(f"-> Mode: Pure Read-Only (Membaca langsung dari GUI MT5 aktif)")
     print(f"-> Port HTTP: {PORT}")
-    print(f"-> Akun Target: {MT5_LOGIN} (Exness Real)")
     print("=" * 60)
 
     server_address = ("0.0.0.0", PORT)
