@@ -8,9 +8,9 @@ Features:
   * Stage 1 (+100 pts): Move SL to +50% target (+60 pts / +$0.60)
   * Stage 2 (+110 pts): Move SL to +75% target (+90 pts / +$0.90)
   * Stage 3 (+120 pts): Move SL to +100% TP1 (+120 pts / +$1.20), trail to TP2
-- Hard Daily Circuit Breaker: Max 2 consecutive losses / -$1.80 daily stop
+- Hard Daily Circuit Breaker: Max 6 consecutive losses / -$5.00 daily stop
 - Clean Telegram Bot Integration: Reset shortcuts via setMyCommands, interactive commands:
-  /status, /saldo, /start, /stop, /help
+  /status, /saldo, /start, /stop, /reset_limit, /help
 """
 
 import os
@@ -76,8 +76,8 @@ DEFAULT_SL_POINTS = float(os.getenv("DEFAULT_SL_POINTS", "65.0"))     # 65 poin 
 TARGET_TP1_POINTS = float(os.getenv("TARGET_TP1_POINTS", "140.0"))   # 140 poin = +$1.40 USD (Kunci Tangga 3)
 TARGET_TP2_POINTS = float(os.getenv("TARGET_TP2_POINTS", "200.0"))   # 200 poin = +$2.00 USD (Runner)
 
-DAILY_LOSS_LIMIT_USD = float(os.getenv("DAILY_LOSS_LIMIT_USD", "1.80"))
-MAX_CONSECUTIVE_LOSS = int(os.getenv("MAX_CONSECUTIVE_LOSS", "2"))
+DAILY_LOSS_LIMIT_USD = float(os.getenv("DAILY_LOSS_LIMIT_USD", "5.00"))
+MAX_CONSECUTIVE_LOSS = int(os.getenv("MAX_CONSECUTIVE_LOSS", "6"))
 CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "65.0"))
 COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", "900"))           # 15 menit post-loss
 WIN_COOLDOWN_SECONDS = int(os.getenv("WIN_COOLDOWN_SECONDS", "300"))   # 5 menit post-win (anti-pucuk)
@@ -111,6 +111,7 @@ class TelegramClient:
             {"command": "saldo", "description": "Cek saldo riil, equity & margin Exness"},
             {"command": "start", "description": "Nyalakan pemindaian pasar & auto-trade"},
             {"command": "stop", "description": "Jeda bot sementara (tahan saldo)"},
+            {"command": "reset_limit", "description": "Reset rem darurat / batas kerugian harian"},
             {"command": "help", "description": "Panduan singkat perintah bot"}
         ]
         try:
@@ -139,7 +140,8 @@ class TelegramClient:
             payload["reply_markup"] = {
                 "keyboard": [
                     [{"text": "/status"}, {"text": "/saldo"}],
-                    [{"text": "/start"}, {"text": "/stop"}]
+                    [{"text": "/start"}, {"text": "/stop"}],
+                    [{"text": "/reset_limit"}]
                 ],
                 "resize_keyboard": True
             }
@@ -204,13 +206,28 @@ class TelegramClient:
                 f"• Proteksi     : Anti-Pucuk, Anti-Lembah, & Jeda {WIN_COOLDOWN_SECONDS//60}m Pasca-Profit\n"
                 f"• Pengawalan   : Tangga Profit bertingkat (+60, +100, +140 pts)"
             )
+        elif clean_cmd in ["/reset_limit", "reset_limit"]:
+            bot.circuit_breaker_active = False
+            bot.daily_consecutive_losses = 0
+            sign_td = "+" if bot.daily_pnl_usd >= 0 else "-"
+            self.send(
+                f"🔓 <b>REM DARURAT BERHASIL DI-RESET</b>\n"
+                f"────────────────────────\n"
+                f"• PnL Hari Ini : <b>{sign_td}${abs(bot.daily_pnl_usd):.2f} USD</b>\n"
+                f"• Batas Harian : <b>-${DAILY_LOSS_LIMIT_USD:.2f} USD</b>\n"
+                f"• Loss Seq     : <b>0/{MAX_CONSECUTIVE_LOSS}</b>\n"
+                f"• Status       : <b>Bot kembali aktif siaga memindai peluang!</b>\n"
+                f"────────────────────────\n"
+                f"<i>Ketik /status untuk mengecek kesiapan entry.</i>"
+            )
         elif clean_cmd in ["/help", "help"]:
             self.send(
                 f"🤖 <b>PERINTAH & STATUS SISTEM AUREUS</b>\n\n"
                 f"/status - Cek posisi berjalan, level profit & status filter\n"
                 f"/saldo  - Cek saldo, equity & margin riil Exness\n"
                 f"/stop   - Jeda eksekusi order MT5 sementara\n"
-                f"/start  - Aktifkan kesiagaan order (>= {int(CONFIDENCE_THRESHOLD)}%)\n\n"
+                f"/start  - Aktifkan kesiagaan order (>= {int(CONFIDENCE_THRESHOLD)}%)\n"
+                f"/reset_limit - Buka kunci rem darurat harian\n\n"
                 f"<i>Sistem berjalan otonom di VPS dengan proteksi Anti-Pucuk & Tangga Profit.</i>"
             )
 
@@ -298,6 +315,8 @@ class AureusSniperBot:
                         f"Eksekusi order otomatis dikunci rapat untuk melindungi modal Anda."
                     )
                     self.telegram.send(cb_msg)
+            else:
+                self.circuit_breaker_active = False
 
     def run_cycle(self, acc_info: dict, current_tick: dict, candles_m1: list, candles_m5: list, candles_m15: list):
         """Dipanggil setiap detik oleh worker thread."""
@@ -538,7 +557,7 @@ class AureusSniperBot:
                     f"🛑 <b>REM DARURAT AKTIF (CIRCUIT BREAKER)</b>\n"
                     f"────────────────────────\n"
                     f"Akumulasi Rugi: -${abs(self.daily_pnl_usd):.2f} USD\n"
-                    f"Aturan: Rugi 2x berturut-turut hari ini.\n"
+                    f"Aturan: Rugi {MAX_CONSECUTIVE_LOSS}x beruntun atau mencapai batas harian (-${DAILY_LOSS_LIMIT_USD:.2f} USD).\n"
                     f"<b>Aksi: Bot ISTIRAHAT TOTAL sampai jam 00:00 besok!</b>\n"
                     f"Saldo Anda aman dan terlindungi."
                 )
