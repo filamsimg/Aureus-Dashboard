@@ -262,12 +262,50 @@ class AureusSniperBot:
             logger.info("Hari baru! Statistik harian di-reset.")
             self.telegram.send(f"🌅 <b>SESI HARI BARU ({today.strftime('%d %b %Y')})</b>\nSistem siap memindai peluang BTCUSDm.")
 
+    def _sync_daily_pnl_from_mt5(self):
+        """Baca Ground Truth PnL riil hari ini langsung dari broker MT5 (Anti-Amnesia)."""
+        if not MT5_AVAILABLE:
+            return
+        now = datetime.now()
+        start_of_day = datetime(now.year, now.month, now.day, 0, 0, 0)
+        deals = mt5.history_deals_get(start_of_day, now + timedelta(days=1))
+        if deals:
+            total_pnl = 0.0
+            consecutive_losses = 0
+            closed_deals = [d for d in deals if d.entry == mt5.DEAL_ENTRY_OUT]
+            for d in closed_deals:
+                pnl = float(d.profit)
+                total_pnl += pnl
+                if pnl < 0:
+                    consecutive_losses += 1
+                elif pnl > 0:
+                    consecutive_losses = 0
+
+            self.daily_pnl_usd = round(total_pnl, 2)
+            self.daily_consecutive_losses = consecutive_losses
+
+            # Trigger Circuit Breaker jika kerugian hari ini melampaui batas harian
+            if (self.daily_consecutive_losses >= MAX_CONSECUTIVE_LOSS) or (self.daily_pnl_usd <= -DAILY_LOSS_LIMIT_USD):
+                if not self.circuit_breaker_active:
+                    self.circuit_breaker_active = True
+                    logger.warning(f"Rem Darurat (Circuit Breaker) aktif! Akumulasi PnL hari ini: -${abs(self.daily_pnl_usd):.2f} USD")
+                    cb_msg = (
+                        f"🛑 <b>REM DARURAT AKTIF (CIRCUIT BREAKER)</b>\n"
+                        f"────────────────────────\n"
+                        f"Akumulasi Rugi Hari Ini: -${abs(self.daily_pnl_usd):.2f} USD\n"
+                        f"Batas Maksimal Harian  : -${DAILY_LOSS_LIMIT_USD:.2f} USD\n"
+                        f"<b>Aksi: Bot ISTIRAHAT TOTAL sampai jam 00:00 besok!</b>\n"
+                        f"Eksekusi order otomatis dikunci rapat untuk melindungi modal Anda."
+                    )
+                    self.telegram.send(cb_msg)
+
     def run_cycle(self, acc_info: dict, current_tick: dict, candles_m1: list, candles_m5: list, candles_m15: list):
         """Dipanggil setiap detik oleh worker thread."""
         if not MT5_AVAILABLE:
             return
 
         self.reset_daily_stats_if_new_day()
+        self._sync_daily_pnl_from_mt5()
 
         # 1. Pantau posisi terbuka saat ini (Tangga Profit 50%, 75%, 100%)
         pos = self._get_open_position()

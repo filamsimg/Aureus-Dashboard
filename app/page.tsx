@@ -6,6 +6,7 @@ import ScalpCard from "@/components/ScalpCard";
 import RiskCard from "@/components/RiskCard";
 import MtfMatrix from "@/components/MtfMatrix";
 import JournalTable from "@/components/JournalTable";
+import LoginGate from "@/components/LoginGate";
 import { Candle } from "@/lib/indicators";
 import { ScalpSignal } from "@/lib/scalpEngine";
 import { TradeEntry, JournalStats } from "@/lib/db";
@@ -16,9 +17,12 @@ import {
   Bot,
   ShieldCheck,
   TrendingUp,
+  LogOut,
+  Lock,
 } from "lucide-react";
 
 export default function DashboardPage() {
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [timeframe, setTimeframe] = useState<string>("M5");
   const [candles, setCandles] = useState<Candle[]>([]);
   const [signal, setSignal] = useState<(ScalpSignal & { isPaused?: boolean; vpsLive?: boolean }) | null>(null);
@@ -182,7 +186,33 @@ export default function DashboardPage() {
     }
   };
 
+  const checkAuth = useCallback(async () => {
+    try {
+      const res = await fetch("/api/auth");
+      const data = await res.json();
+      setIsAuthenticated(Boolean(data.authenticated));
+    } catch {
+      setIsAuthenticated(false);
+    }
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/auth", { method: "DELETE" });
+      setIsAuthenticated(false);
+      showToast("Sesi dikunci. Silakan masukkan PIN untuk masuk kembali.");
+    } catch (err) {
+      console.error("Logout error:", err);
+    }
+  };
+
   useEffect(() => {
+    checkAuth();
+  }, [checkAuth]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
     // Clean up any legacy exposed settings from previous versions
     localStorage.removeItem("aureus_vps_url");
     localStorage.removeItem("aureus_gemini_key");
@@ -212,7 +242,24 @@ export default function DashboardPage() {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [timeframe, loadCandles, fetchAccount, runAnalysis, loadJournal]);
+  }, [isAuthenticated, timeframe, loadCandles, fetchAccount, runAnalysis, loadJournal]);
+
+  // Loading state saat verifikasi sesi cookie
+  if (isAuthenticated === null) {
+    return (
+      <div className="min-h-screen bg-[#09090b] flex items-center justify-center text-zinc-400">
+        <div className="flex items-center gap-3 text-sm">
+          <span className="w-4 h-4 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+          <span>Memeriksa otorisasi sesi...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Jika belum login, tampilkan LoginGate
+  if (!isAuthenticated) {
+    return <LoginGate onSuccess={() => setIsAuthenticated(true)} />;
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-[#09090b] text-zinc-100 antialiased">
@@ -307,6 +354,16 @@ export default function DashboardPage() {
             >
               <RefreshCw className="w-4 h-4 text-zinc-400" />
               <span className="text-zinc-300 tabular-nums">{countdown}s</span>
+            </button>
+
+            {/* Lock / Logout Button */}
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-900/80 hover:bg-rose-950/40 hover:text-rose-300 hover:border-rose-800/60 text-zinc-400 border border-zinc-800/80 text-xs sm:text-sm font-semibold transition active:scale-95"
+              title="Kunci Dashboard (Keluar)"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Kunci</span>
             </button>
           </div>
         </div>
