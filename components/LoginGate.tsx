@@ -76,12 +76,9 @@ export default function LoginGate({ onSuccess }: LoginGateProps) {
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-zinc-300 flex items-center justify-between">
-              <span className="flex items-center gap-1.5">
-                <KeyRound className="w-3.5 h-3.5 text-zinc-400" />
-                PIN Keamanan
-              </span>
-              <span className="text-[11px] text-zinc-500">Default: 8898</span>
+            <label className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+              <KeyRound className="w-3.5 h-3.5 text-zinc-400" />
+              <span>PIN Akses Keamanan</span>
             </label>
             <div className="relative">
               <input
@@ -92,7 +89,7 @@ export default function LoginGate({ onSuccess }: LoginGateProps) {
                   if (errorMsg) setErrorMsg(null);
                 }}
                 autoFocus
-                placeholder="Ketik PIN akses..."
+                placeholder="Masukkan PIN..."
                 className="w-full bg-zinc-900/90 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 placeholder:text-zinc-600 text-sm font-mono tracking-wider focus:outline-hidden focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/30 transition pr-12"
               />
               <button
