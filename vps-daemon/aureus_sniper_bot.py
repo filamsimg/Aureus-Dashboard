@@ -218,7 +218,7 @@ class TelegramClient:
 class AureusSniperBot:
     def __init__(self):
         self.telegram = TelegramClient(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-        self.is_paused = False
+        self.is_paused = True  # Safe Default: Terkunci rapat saat start, wajib /start manual via Telegram
         
         # State harian
         self.current_date = date.today()
