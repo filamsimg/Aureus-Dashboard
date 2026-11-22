@@ -140,8 +140,8 @@ export function evaluateScalp(
 
   score = Math.max(-100, Math.min(100, score));
 
-  // Volatility Gate: Strictly cap SL at 65 pts ($0.65 USD) to protect against broker slippage
-  let slDistance = 65.0;
+  // Volatility Gate: Strictly cap SL at 85 pts ($0.85 USD) for precision EMA 21 Limit Orders
+  let slDistance = 85.0;
   const isVolatilityTooHigh = atrM5 > 220;
 
   // Room-to-Run & Sideways Gating
@@ -224,9 +224,9 @@ export function evaluateScalp(
   const fixedLot = 0.01;
   const maxLossUsd = Number((slDistance * fixedLot).toFixed(2));
   const maxLossPct = Number(((maxLossUsd / capital) * 100).toFixed(1));
-  const profitTp1 = Number((maxLossUsd * 1.5).toFixed(2));
-  const profitTp2 = Number((maxLossUsd * 2.5).toFixed(2));
-  const profitTp3 = Number((maxLossUsd * 3.5).toFixed(2));
+  const profitTp1 = 1.40;
+  const profitTp2 = 2.00;
+  const profitTp3 = 2.50;
   const marginEst = Number(((currentPrice * fixedLot) / 2000).toFixed(2));
 
   let safety: RiskProfile["safetyRating"] = "AMAN";

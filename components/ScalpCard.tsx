@@ -191,7 +191,7 @@ export default function ScalpCard({ signal }: ScalpCardProps) {
         <div className="flex items-center justify-between p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs sm:text-sm">
           <span className="font-semibold text-rose-300">Batas Rugi (SL)</span>
           <span className="font-extrabold text-rose-400 tabular-nums">
-            ${signal.stopLoss.toLocaleString("en-US", { minimumFractionDigits: 2 })} (-$0.80 USD)
+            ${signal.stopLoss.toLocaleString("en-US", { minimumFractionDigits: 2 })} (-$0.85 USD)
           </span>
         </div>
 
