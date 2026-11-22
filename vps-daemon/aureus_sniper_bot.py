@@ -72,7 +72,7 @@ SYMBOL_TARGET = os.getenv("SYMBOL_TARGET", "BTCUSDm")
 MAGIC_NUMBER = int(os.getenv("MAGIC_NUMBER", "778898"))
 FIXED_LOT = float(os.getenv("FIXED_LOT", "0.01"))
 
-DEFAULT_SL_POINTS = float(os.getenv("DEFAULT_SL_POINTS", "80.0"))     # 80 poin = -$0.80 USD
+DEFAULT_SL_POINTS = float(os.getenv("DEFAULT_SL_POINTS", "70.0"))     # 70 poin = -$0.70 USD (Cegah over-loss saat slippage)
 TARGET_TP1_POINTS = float(os.getenv("TARGET_TP1_POINTS", "140.0"))   # 140 poin = +$1.40 USD (Kunci Tangga 3)
 TARGET_TP2_POINTS = float(os.getenv("TARGET_TP2_POINTS", "200.0"))   # 200 poin = +$2.00 USD (Runner)
 
@@ -493,14 +493,36 @@ class AureusSniperBot:
             else:
                 score -= 10
 
-        # 3. Indikator M5 Setup (Bobot 40%)
+        # 3. Indikator M5 Setup & Trend Lock (Bobot 40%)
+        ema9_m5 = self._calc_ema(closes_m5, 9)
+        ema21_m5 = self._calc_ema(closes_m5, 21)
+        st_m5 = self._calc_supertrend(candles_m5)
+
+        m5_trend = "BULLISH" if (st_m5 == "BULLISH" and closes_m5[-1] >= ema21_m5) else \
+                   "BEARISH" if (st_m5 == "BEARISH" and closes_m5[-1] <= ema21_m5) else "NEUTRAL"
+
+        if m5_trend == "BULLISH":
+            score += 15
+            reasons.append("Tren M5 Naik (SuperTrend Hijau & Di Atas EMA 21)")
+        elif m5_trend == "BEARISH":
+            score -= 15
+            reasons.append("Tren M5 Turun (SuperTrend Merah & Di Bawah EMA 21)")
+
+        # RSI 7 M5 Filter (Rebound Hook Confirmation - Bukan Blind Falling Knife)
         rsi7_m5 = self._calc_rsi(closes_m5, 7)
-        if rsi7_m5 <= 28.0:
-            score += 20
-            reasons.append(f"RSI M5 Jenuh Jual ({rsi7_m5:.1f}) - Siap Membal")
-        elif rsi7_m5 >= 72.0:
-            score -= 20
-            reasons.append(f"RSI M5 Jenuh Beli ({rsi7_m5:.1f}) - Siap Koreksi")
+        rsi7_prev = self._calc_rsi(closes_m5[:-1], 7)
+        if rsi7_m5 <= 30.0:
+            if rsi7_m5 > rsi7_prev:
+                score += 15
+                reasons.append(f"RSI M5 Rebound Naik ({rsi7_m5:.1f} > {rsi7_prev:.1f})")
+            else:
+                reasons.append(f"RSI M5 Oversold ({rsi7_m5:.1f}) - Tekanan Jual Masih Berlanjut")
+        elif rsi7_m5 >= 70.0:
+            if rsi7_m5 < rsi7_prev:
+                score -= 15
+                reasons.append(f"RSI M5 Berbalik Turun ({rsi7_m5:.1f} < {rsi7_prev:.1f})")
+            else:
+                reasons.append(f"RSI M5 Overbought ({rsi7_m5:.1f}) - Tekanan Beli Masih Berlanjut")
 
         # MACD Hist M5
         macd_hist = self._calc_macd_hist(closes_m5)
@@ -509,21 +531,21 @@ class AureusSniperBot:
         else:
             score -= 10
 
-        # Pin Bar M5
-        last_c = candles_m5[-1]
-        c_body = abs(last_c["close"] - last_c["open"])
-        c_range = max(0.1, last_c["high"] - last_c["low"])
-        lower_wick = min(last_c["open"], last_c["close"]) - last_c["low"]
-        upper_wick = last_c["high"] - max(last_c["open"], last_c["close"])
+        # Pin Bar M5 (HANYA Evaluasi Candle Selesai [-2] agar bebas dari kedipan harga palsu)
+        confirmed_c = candles_m5[-2] if len(candles_m5) >= 2 else candles_m5[-1]
+        c_body = abs(confirmed_c["close"] - confirmed_c["open"])
+        c_range = max(0.1, confirmed_c["high"] - confirmed_c["low"])
+        lower_wick = min(confirmed_c["open"], confirmed_c["close"]) - confirmed_c["low"]
+        upper_wick = confirmed_c["high"] - max(confirmed_c["open"], confirmed_c["close"])
 
         if lower_wick > c_body * 2.0 and lower_wick / c_range > 0.5:
-            score += 15
-            reasons.append("Penolakan Bawah M5 (Buyer Kuat)")
+            score += 10
+            reasons.append("Konfirmasi Candle M5: Rejection Bawah (Buyer Masuk)")
         elif upper_wick > c_body * 2.0 and upper_wick / c_range > 0.5:
-            score -= 15
-            reasons.append("Penolakan Atas M5 (Seller Kuat)")
+            score -= 10
+            reasons.append("Konfirmasi Candle M5: Rejection Atas (Seller Masuk)")
 
-        # 4. Indikator M1 Trigger (Bobot 30%)
+        # 4. Indikator M1 Trigger (Bobot 20%)
         if len(candles_m1) >= 15:
             closes_m1 = [c["close"] for c in candles_m1]
             st_m1 = self._calc_supertrend(candles_m1)
@@ -567,8 +589,12 @@ class AureusSniperBot:
             direction = "WAIT"
             reasons.insert(0, f"Pasar Sideways / Choppy (ADX M5 {adx_m5:.1f} < {ADX_CHOP_THRESHOLD:.0f}). Menahan peluru.")
         elif score >= CONFIDENCE_THRESHOLD:
-            # Check Room to Run for BUY (Anti-Pucuk)
-            if cur_price < recent_high_20 and room_to_high < MIN_ROOM_TO_RUN_POINTS:
+            # HARD TREND GATE: DILARANG MEMBELI JIKA TREN M5 SEDANG BEARISH
+            if m5_trend == "BEARISH":
+                direction = "WAIT"
+                signal_type = "TUNGGU (TREN M5 TURUN)"
+                reasons.insert(0, "⛔ Beli Ditolak Keras: Tren M5 sedang Turun (Menolak Membeli Pisau Jatuh).")
+            elif cur_price < recent_high_20 and room_to_high < MIN_ROOM_TO_RUN_POINTS:
                 signal_type = "TUNGGU (DEKAT RESISTENSI)"
                 direction = "WAIT"
                 reasons.insert(0, f"Beli Ditolak: Plafon Resisten M5 hanya +{room_to_high:.1f} pts (< {MIN_ROOM_TO_RUN_POINTS:.0f} pts). Menghindari beli di pucuk.")
@@ -576,8 +602,12 @@ class AureusSniperBot:
                 direction = "BUY"
                 signal_type = "BELI (BUY)"
         elif score <= -CONFIDENCE_THRESHOLD:
-            # Check Room to Run for SELL (Anti-Lembah)
-            if cur_price > recent_low_20 and room_to_low < MIN_ROOM_TO_RUN_POINTS:
+            # HARD TREND GATE: DILARANG MENJUAL JIKA TREN M5 SEDANG BULLISH
+            if m5_trend == "BULLISH":
+                direction = "WAIT"
+                signal_type = "TUNGGU (TREN M5 NAIK)"
+                reasons.insert(0, "⛔ Jual Ditolak Keras: Tren M5 sedang Naik (Menolak Menjual di Tren Kuat).")
+            elif cur_price > recent_low_20 and room_to_low < MIN_ROOM_TO_RUN_POINTS:
                 signal_type = "TUNGGU (DEKAT SUPPORT)"
                 direction = "WAIT"
                 reasons.insert(0, f"Jual Ditolak: Lantai Support M5 hanya -{room_to_low:.1f} pts (< {MIN_ROOM_TO_RUN_POINTS:.0f} pts). Menghindari jual di lembah.")

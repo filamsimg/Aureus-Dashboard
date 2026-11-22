@@ -95,7 +95,7 @@ def deploy():
         f'SYMBOL_TARGET="{env_vars.get("TRADING_SYMBOL", "BTCUSDm")}"',
         f'MAGIC_NUMBER="{env_vars.get("TRADING_MAGIC_NUMBER", "778898")}"',
         f'FIXED_LOT="{env_vars.get("TRADING_FIXED_LOT", "0.01")}"',
-        f'DEFAULT_SL_POINTS="{env_vars.get("TRADING_SL_POINTS", "80.0")}"',
+        f'DEFAULT_SL_POINTS="{env_vars.get("TRADING_SL_POINTS", "70.0")}"',
         f'TARGET_TP1_POINTS="{env_vars.get("TRADING_TP1_POINTS", "140.0")}"',
         f'TARGET_TP2_POINTS="{env_vars.get("TRADING_TP2_POINTS", "200.0")}"',
         f'DAILY_LOSS_LIMIT_USD="{env_vars.get("TRADING_MAX_DAILY_LOSS", "1.80")}"',

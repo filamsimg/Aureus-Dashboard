@@ -125,10 +125,19 @@ export function evaluateScalp(
 
   score = Math.max(-100, Math.min(100, score));
 
-  // Volatility Gate: Strictly cap SL for $20 Real Standard account
+  // Volatility Gate: Strictly cap SL at 70 pts ($0.70 USD) to protect against broker slippage
   const atrM5 = m5?.atr || 90;
-  let slDistance = Number(Math.max(70, Math.min(130, atrM5 * 1.1)).toFixed(2));
+  let slDistance = 70.0;
   const isVolatilityTooHigh = atrM5 > 140;
+
+  // M5 Trend Gate (Strict Anti-Falling-Knife Protection)
+  const m5Trend = m5
+    ? m5.supertrend === "BULLISH" && currentPrice >= (m5.ema21 || currentPrice)
+      ? "BULLISH"
+      : m5.supertrend === "BEARISH" && currentPrice <= (m5.ema21 || currentPrice)
+      ? "BEARISH"
+      : "NEUTRAL"
+    : "NEUTRAL";
 
   // Room-to-Run & Sideways Gating
   const sub20 = ratesM5.slice(-20);
@@ -154,7 +163,11 @@ export function evaluateScalp(
     direction = "WAIT";
     reasons.unshift(`⚠️ Pasar Sideways/Choppy (ADX M5 ${adxM5} < 20). Menahan peluru.`);
   } else if (score >= CONFIDENCE_THRESHOLD) {
-    if (currentPrice < recentHigh20 && roomToHigh < minRoom) {
+    if (m5Trend === "BEARISH") {
+      signalType = "TUNGGU (PASAR SIDEWAYS)";
+      direction = "WAIT";
+      reasons.unshift("⛔ Beli Ditolak Keras: Tren M5 sedang Turun (Menolak Membeli Pisau Jatuh).");
+    } else if (currentPrice < recentHigh20 && roomToHigh < minRoom) {
       signalType = "TUNGGU (DEKAT RESISTENSI)";
       direction = "WAIT";
       reasons.unshift(`⚠️ Beli Ditolak: Plafon Resisten M5 hanya +${roomToHigh.toFixed(1)} pts (< ${minRoom} pts). Menghindari beli di pucuk.`);
@@ -163,7 +176,11 @@ export function evaluateScalp(
       direction = "BUY";
     }
   } else if (score <= -CONFIDENCE_THRESHOLD) {
-    if (currentPrice > recentLow20 && roomToLow < minRoom) {
+    if (m5Trend === "BULLISH") {
+      signalType = "TUNGGU (PASAR SIDEWAYS)";
+      direction = "WAIT";
+      reasons.unshift("⛔ Jual Ditolak Keras: Tren M5 sedang Naik (Menolak Menjual di Tren Kuat).");
+    } else if (currentPrice > recentLow20 && roomToLow < minRoom) {
       signalType = "TUNGGU (DEKAT SUPPORT)";
       direction = "WAIT";
       reasons.unshift(`⚠️ Jual Ditolak: Lantai Support M5 hanya -${roomToLow.toFixed(1)} pts (< ${minRoom} pts). Menghindari jual di lembah.`);
