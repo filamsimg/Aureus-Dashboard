@@ -56,24 +56,31 @@ def upload_file(local_path, remote_path):
 
     expected_len = len(content)
     b64 = base64.b64encode(content).decode("ascii")
-    chunk_size = 1500
+    chunk_size = 2000
     chunks = [b64[i:i+chunk_size] for i in range(0, len(b64), chunk_size)]
     
     tmp_b64 = remote_path + ".b64"
-    session.run_ps(f'if (Test-Path "{tmp_b64}") {{ Remove-Item "{tmp_b64}" -Force }}; [System.IO.File]::WriteAllText("{tmp_b64}", "")')
-    for i, c in enumerate(chunks):
-        session.run_ps(f'[System.IO.File]::AppendAllText("{tmp_b64}", "{c}")')
-        if (i + 1) % 5 == 0 or (i + 1) == len(chunks):
-            print(f"    Chunk {i+1}/{len(chunks)} OK", flush=True)
+    for attempt in range(1, 4):
+        session.run_ps(f'if (Test-Path "{tmp_b64}") {{ Remove-Item "{tmp_b64}" -Force }}; [System.IO.File]::WriteAllText("{tmp_b64}", "")')
+        for i, c in enumerate(chunks):
+            r = session.run_ps(f'[System.IO.File]::AppendAllText("{tmp_b64}", "{c}")')
+            if (i + 1) % 5 == 0 or (i + 1) == len(chunks):
+                print(f"    Chunk {i+1}/{len(chunks)} OK", flush=True)
 
-    res = session.run_ps(f'''
-    $b64 = [System.IO.File]::ReadAllText("{tmp_b64}").Trim()
-    [System.IO.File]::WriteAllBytes("{remote_path}", [System.Convert]::FromBase64String($b64))
-    Remove-Item -Path "{tmp_b64}" -Force
-    (Get-Item "{remote_path}").Length
-    ''')
-    bytes_written = res.std_out.decode("utf-8").strip()
-    print(f"  ✓ Selesai ({bytes_written} bytes, target: {expected_len} bytes)", flush=True)
+        res = session.run_ps(f'''
+        $b64 = [System.IO.File]::ReadAllText("{tmp_b64}").Trim()
+        [System.IO.File]::WriteAllBytes("{remote_path}", [System.Convert]::FromBase64String($b64))
+        Remove-Item -Path "{tmp_b64}" -Force
+        (Get-Item "{remote_path}").Length
+        ''')
+        bytes_written = res.std_out.decode("utf-8").strip()
+        if bytes_written.isdigit() and int(bytes_written) == expected_len:
+            print(f"  ✓ Selesai ({bytes_written} bytes, target: {expected_len} bytes)", flush=True)
+            return
+        else:
+            print(f"  ⚠️ Ukuran tidak cocok ({bytes_written} != {expected_len}), mencoba lagi (percobaan {attempt}/3)...", flush=True)
+            time.sleep(2)
+    raise RuntimeError(f"Gagal upload file {local_path} setelah 3 percobaan.")
 
 def deploy():
     root_dir = Path(__file__).resolve().parent.parent

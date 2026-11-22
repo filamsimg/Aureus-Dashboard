@@ -289,7 +289,7 @@ class AureusSniperBot:
         if deals:
             total_pnl = 0.0
             consecutive_losses = 0
-            closed_deals = [d for d in deals if d.entry == mt5.DEAL_ENTRY_OUT]
+            closed_deals = [d for d in deals if d.entry == mt5.DEAL_ENTRY_OUT and d.magic == MAGIC_NUMBER]
             for d in closed_deals:
                 pnl = float(d.profit)
                 total_pnl += pnl
