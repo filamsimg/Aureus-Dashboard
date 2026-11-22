@@ -405,6 +405,17 @@ class AureusSniperBot:
         if not tick:
             return False
         price = tick.bid if pos.type == mt5.ORDER_TYPE_BUY else tick.ask
+
+        sym_info = mt5.symbol_info(pos.symbol)
+        filling = mt5.ORDER_FILLING_IOC
+        if sym_info:
+            if sym_info.filling_mode & 2:
+                filling = mt5.ORDER_FILLING_IOC
+            elif sym_info.filling_mode & 1:
+                filling = mt5.ORDER_FILLING_FOK
+            else:
+                filling = mt5.ORDER_FILLING_RETURN
+
         req = {
             "action": mt5.TRADE_ACTION_DEAL,
             "position": pos.ticket,
@@ -412,14 +423,25 @@ class AureusSniperBot:
             "volume": float(pos.volume),
             "type": order_type,
             "price": float(price),
-            "deviation": 25,
+            "deviation": 50,
             "magic": MAGIC_NUMBER,
             "comment": "Watchdog Emergency Cut",
             "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "type_filling": filling,
         }
         res = mt5.order_send(req)
-        return res is not None and res.retcode == mt5.TRADE_RETCODE_DONE
+        success = (res is not None and res.retcode == mt5.TRADE_RETCODE_DONE)
+        if success:
+            msg = (
+                f"🚨 <b>[SOFT WATCHDOG CUT LOSS DARURAT]</b>\n"
+                f"────────────────────────\n"
+                f"Posisi   : #{pos.ticket} ({'BUY' if pos.type == mt5.ORDER_TYPE_BUY else 'SELL'})\n"
+                f"Status   : Floating loss melampaui toleransi -${WATCHDOG_MAX_LOSS_USD:.2f} USD!\n"
+                f"Aksi     : Market Close darurat sukses dieksekusi broker.\n"
+                f"Modal aman dan terlindungi dari lonjakan slippage."
+            )
+            self.telegram.send(msg)
+        return success
 
     def _modify_sl(self, pos, new_sl: float, new_tp: float) -> bool:
         req = {
@@ -536,9 +558,11 @@ class AureusSniperBot:
         # Setup BUY Rebound:
         # Harga menguji EMA 21, candle [-2] ditutup hijau di atas EMA 21 dengan rejection bawah/engulfing
         touched_ema21_buy = (c_prev["low"] <= (ema21_m5 + 0.25 * atr_m5))
+        has_min_body_or_range = (body_prev >= 4.0 or (c_prev["high"] - c_prev["low"]) >= 12.0)
         rebound_buy_confirmed = (
             c_prev["close"] > c_prev["open"] and           # Candle Hijau
             c_prev["close"] >= ema21_m5 and                 # Bertahan di atas EMA 21
+            has_min_body_or_range and                       # Bukan doji mati
             (lower_wick >= 0.8 * body_prev or c_prev["close"] > c_prev2["high"]) and # Rejection/Engulfing
             38.0 <= rsi7_m5 <= 60.0 and rsi7_m5 >= rsi7_prev # Rebound RSI di zona tren
         )
@@ -548,6 +572,7 @@ class AureusSniperBot:
         rebound_sell_confirmed = (
             c_prev["close"] < c_prev["open"] and           # Candle Merah
             c_prev["close"] <= ema21_m5 and                 # Tertahan di bawah EMA 21
+            has_min_body_or_range and                       # Bukan doji mati
             (upper_wick >= 0.8 * body_prev or c_prev["close"] < c_prev2["low"]) and # Rejection/Engulfing
             40.0 <= rsi7_m5 <= 62.0 and rsi7_m5 <= rsi7_prev
         )
@@ -559,14 +584,16 @@ class AureusSniperBot:
             score -= 40
             reasons.append("Trigger: Rejection Terkonfirmasi di EMA 21 M5 (Closed Candle)")
 
-        # 4. Trigger Cepat M1 Momentum (Bobot 25%)
+        # 4. Trigger Cepat M1 Momentum (Bobot 25%) - Memperkuat sinyal searah
         if len(candles_m1) >= 15:
             closes_m1 = [c["close"] for c in candles_m1]
             ema9_m1 = self._calc_ema(closes_m1, 9)
-            if closes_m1[-1] > ema9_m1:
+            if closes_m1[-1] > ema9_m1 and score >= 0:
                 score += 25
-            elif closes_m1[-1] < ema9_m1:
+                reasons.append("Momentum M1: Konfirmasi Bullish di atas EMA 9")
+            elif closes_m1[-1] < ema9_m1 and score <= 0:
                 score -= 25
+                reasons.append("Momentum M1: Konfirmasi Bearish di bawah EMA 9")
 
         # 5. Room to Run Filter (50 pts dari Swing M5)
         sub20 = candles_m5[-21:-1]
@@ -574,8 +601,9 @@ class AureusSniperBot:
         recent_low_20 = min(c["low"] for c in sub20) if sub20 else c_prev["close"]
         cur_price = current_tick.get("ask" if score >= 0 else "bid", c_prev["close"])
         
-        room_to_high = recent_high_20 - cur_price
-        room_to_low = cur_price - recent_low_20
+        # Jika harga sudah breakout di luar swing 20 bar, ruang gerak terbuka bebas
+        room_to_high = max(0.0, recent_high_20 - cur_price) if cur_price < recent_high_20 else 999.0
+        room_to_low = max(0.0, cur_price - recent_low_20) if cur_price > recent_low_20 else 999.0
 
         # Bound score -100 to 100
         score = max(-100, min(100, score))
@@ -755,22 +783,72 @@ class AureusSniperBot:
         # Rough signal approximation
         return macd_line
 
-    def _calc_supertrend(self, candles: list, period: int = 10, multiplier: float = 3.0) -> str:
+    def _calc_supertrend(self, candles: list, period: int = 10, multiplier: float = 2.5) -> str:
+        """Kalkulasi SuperTrend standar dengan Trailing Upper/Lower Band dinamis."""
         if len(candles) < period + 1:
             return "BULLISH"
-        closes = [c["close"] for c in candles]
-        highs = [c["high"] for c in candles]
-        lows = [c["low"] for c in candles]
         
-        ranges = [max(h - l, abs(h - c_prev), abs(l - c_prev)) for h, l, c_prev in zip(highs[1:], lows[1:], closes[:-1])]
-        atr = sum(ranges[-period:]) / period if ranges else 50.0
-        hl2 = (highs[-1] + lows[-1]) / 2.0
-        upper = hl2 + (multiplier * atr)
-        lower = hl2 - (multiplier * atr)
-
-        if closes[-1] > lower:
+        trs = []
+        for i in range(1, len(candles)):
+            h = float(candles[i]["high"])
+            l = float(candles[i]["low"])
+            c_prev = float(candles[i - 1]["close"])
+            trs.append(max(h - l, abs(h - c_prev), abs(l - c_prev)))
+            
+        if len(trs) < period:
             return "BULLISH"
-        return "BEARISH"
+            
+        atr_vals = [sum(trs[:period]) / period]
+        for i in range(period, len(trs)):
+            atr_vals.append((atr_vals[-1] * (period - 1) + trs[i]) / period)
+            
+        offset = len(candles) - len(atr_vals)
+        final_upper = 0.0
+        final_lower = 0.0
+        current_dir = "BULLISH"
+        
+        for i in range(len(atr_vals)):
+            c_idx = i + offset
+            h = float(candles[c_idx]["high"])
+            l = float(candles[c_idx]["low"])
+            close = float(candles[c_idx]["close"])
+            hl2 = (h + l) / 2.0
+            cur_atr = atr_vals[i]
+            
+            basic_upper = hl2 + (multiplier * cur_atr)
+            basic_lower = hl2 - (multiplier * cur_atr)
+            
+            if i == 0:
+                final_upper = basic_upper
+                final_lower = basic_lower
+                current_dir = "BULLISH" if close >= basic_lower else "BEARISH"
+                continue
+                
+            prev_close = float(candles[c_idx - 1]["close"])
+            prev_upper = final_upper
+            prev_lower = final_lower
+            prev_dir = current_dir
+            
+            # Trailing Lower Band
+            if basic_lower > prev_lower or prev_close < prev_lower:
+                final_lower = basic_lower
+            else:
+                final_lower = prev_lower
+                
+            # Trailing Upper Band
+            if basic_upper < prev_upper or prev_close > prev_upper:
+                final_upper = basic_upper
+            else:
+                final_upper = prev_upper
+                
+            if prev_dir == "BULLISH" and close < prev_lower:
+                current_dir = "BEARISH"
+            elif prev_dir == "BEARISH" and close > prev_upper:
+                current_dir = "BULLISH"
+            else:
+                current_dir = prev_dir
+                
+        return current_dir
 
     def _calculate_adx(self, candles: list, period: int = 14) -> float:
         """Calculate 14-period Wilder's ADX on candles."""

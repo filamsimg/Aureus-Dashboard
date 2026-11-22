@@ -141,30 +141,52 @@ export function calculateSupertrend(candles: Candle[], period: number = 10, mult
   const st: number[] = new Array(n).fill(0);
   const direction: ("BULLISH" | "BEARISH")[] = new Array(n).fill("BULLISH");
 
-  for (let i = 1; i < n; i++) {
+  let finalUpper = 0;
+  let finalLower = 0;
+
+  for (let i = 0; i < n; i++) {
     const hl2 = (candles[i].high + candles[i].low) / 2;
-    const upper = hl2 + multiplier * (atr[i] || 50);
-    const lower = hl2 - multiplier * (atr[i] || 50);
+    const curAtr = atr[i] || 50;
+    const basicUpper = hl2 + multiplier * curAtr;
+    const basicLower = hl2 - multiplier * curAtr;
+
+    if (i === 0) {
+      finalUpper = basicUpper;
+      finalLower = basicLower;
+      direction[i] = candles[i].close >= basicLower ? "BULLISH" : "BEARISH";
+      st[i] = direction[i] === "BULLISH" ? finalLower : finalUpper;
+      continue;
+    }
 
     const prevClose = candles[i - 1].close;
+    const prevUpper = finalUpper;
+    const prevLower = finalLower;
     const prevDir = direction[i - 1];
 
-    if (prevDir === "BULLISH") {
-      if (candles[i].close < lower) {
-        direction[i] = "BEARISH";
-        st[i] = upper;
-      } else {
-        direction[i] = "BULLISH";
-        st[i] = lower;
-      }
+    // Trailing Lower Band (Hanya naik saat tren naik atau reset saat tembus)
+    if (basicLower > prevLower || prevClose < prevLower) {
+      finalLower = basicLower;
     } else {
-      if (candles[i].close > upper) {
-        direction[i] = "BULLISH";
-        st[i] = lower;
-      } else {
-        direction[i] = "BEARISH";
-        st[i] = upper;
-      }
+      finalLower = prevLower;
+    }
+
+    // Trailing Upper Band (Hanya turun saat tren turun atau reset saat tembus)
+    if (basicUpper < prevUpper || prevClose > prevUpper) {
+      finalUpper = basicUpper;
+    } else {
+      finalUpper = prevUpper;
+    }
+
+    // Arah Tren Berbalik jika menembus trailing band
+    if (prevDir === "BULLISH" && candles[i].close < prevLower) {
+      direction[i] = "BEARISH";
+      st[i] = finalUpper;
+    } else if (prevDir === "BEARISH" && candles[i].close > prevUpper) {
+      direction[i] = "BULLISH";
+      st[i] = finalLower;
+    } else {
+      direction[i] = prevDir;
+      st[i] = prevDir === "BULLISH" ? finalLower : finalUpper;
     }
   }
 

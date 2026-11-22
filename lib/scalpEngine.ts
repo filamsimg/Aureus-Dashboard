@@ -70,81 +70,88 @@ export function evaluateScalp(
   const reasons: string[] = [];
   let score = 0;
 
-  // 1. M15 Trend Filter (30%)
-  if (m15) {
-    if (m15.ribbon === "BULLISH_ALIGNMENT") {
-      score += 15;
-      reasons.push("Tren M15 Naik (EMA 9 > 21 > 50)");
-    } else if (m15.ribbon === "BEARISH_ALIGNMENT") {
-      score -= 15;
-      reasons.push("Tren M15 Turun (EMA 9 < 21 < 50)");
-    }
+  // 1. Rezim Tren Makro M15 & M5 (Bobot 35%)
+  const isM15Bull = m15?.supertrend === "BULLISH";
+  const isM15Bear = m15?.supertrend === "BEARISH";
+  const isM5Bull = m5?.supertrend === "BULLISH" || (m5 ? m5.ema21 > m5.ema50 : false);
+  const isM5Bear = m5?.supertrend === "BEARISH" || (m5 ? m5.ema21 < m5.ema50 : false);
 
-    if (m15.supertrend === "BULLISH") score += 10;
-    else score -= 10;
+  const isBullRegime = isM15Bull && isM5Bull;
+  const isBearRegime = isM15Bear && isM5Bear;
+
+  if (isBullRegime) {
+    score += 35;
+    reasons.push("Rezim Tren Bullish (M15 & M5 Selaras)");
+  } else if (isBearRegime) {
+    score -= 35;
+    reasons.push("Rezim Tren Bearish (M15 & M5 Selaras)");
   }
 
-  // 2. M5 Setup (40%)
-  if (m5) {
-    if (m5.rsi7 <= 28) {
-      score += 20;
-      reasons.push(`RSI M5 Jenuh Jual (${m5.rsi7}) - Siap Memantul Naik`);
-    } else if (m5.rsi7 >= 72) {
-      score -= 20;
-      reasons.push(`RSI M5 Jenuh Beli (${m5.rsi7}) - Siap Berbalik Turun`);
-    }
+  // 2. Pullback Zone & Trigger Rebound EMA 21 (Bobot 40%)
+  const atrM5 = m5?.atr || 90;
+  const ema21M5 = m5?.ema21 || currentPrice;
+  const rsi7M5 = m5?.rsi7 || 50;
 
-    if (m5.macdHist > 0) score += 10;
-    else score -= 10;
+  if (ratesM5.length >= 3) {
+    const cPrev = ratesM5[ratesM5.length - 2];
+    const cPrev2 = ratesM5[ratesM5.length - 3];
+    const bodyPrev = Math.abs(cPrev.close - cPrev.open);
+    const lowerWick = Math.min(cPrev.open, cPrev.close) - cPrev.low;
+    const upperWick = cPrev.high - Math.max(cPrev.open, cPrev.close);
+    const hasMinBody = bodyPrev >= 4.0 || (cPrev.high - cPrev.low) >= 12.0;
 
-    if (m5.candlePattern === "BULLISH_PIN_BAR") {
-      score += 15;
-      reasons.push("Candle M5 Penolakan Bawah (Buyer Kuat)");
-    } else if (m5.candlePattern === "BEARISH_PIN_BAR") {
-      score -= 15;
-      reasons.push("Candle M5 Penolakan Atas (Seller Kuat)");
-    }
+    const touchedEmaBuy = cPrev.low <= ema21M5 + 0.25 * atrM5;
+    const reboundBuy =
+      cPrev.close > cPrev.open &&
+      cPrev.close >= ema21M5 &&
+      hasMinBody &&
+      (lowerWick >= 0.8 * bodyPrev || cPrev.close > cPrev2.high) &&
+      rsi7M5 >= 38.0 &&
+      rsi7M5 <= 60.0;
 
-    if (m5.smc.orderBlock === "BULLISH_OB") {
-      score += 10;
-      reasons.push("Area Beli Kuat (Bullish Order Block)");
-    } else if (m5.smc.orderBlock === "BEARISH_OB") {
-      score -= 10;
-      reasons.push("Area Jual Kuat (Bearish Order Block)");
+    const touchedEmaSell = cPrev.high >= ema21M5 - 0.25 * atrM5;
+    const reboundSell =
+      cPrev.close < cPrev.open &&
+      cPrev.close <= ema21M5 &&
+      hasMinBody &&
+      (upperWick >= 0.8 * bodyPrev || cPrev.close < cPrev2.low) &&
+      rsi7M5 >= 40.0 &&
+      rsi7M5 <= 62.0;
+
+    if (isBullRegime && touchedEmaBuy && reboundBuy) {
+      score += 40;
+      reasons.push("Trigger: Rebound Terkonfirmasi di EMA 21 M5 (Closed Candle)");
+    } else if (isBearRegime && touchedEmaSell && reboundSell) {
+      score -= 40;
+      reasons.push("Trigger: Rejection Terkonfirmasi di EMA 21 M5 (Closed Candle)");
     }
   }
 
-  // 3. M1 Trigger (30%)
+  // 3. Trigger Cepat M1 Momentum (Bobot 25%) - Memperkuat sinyal searah
   if (m1) {
-    if (m1.supertrend === "BULLISH") score += 10;
-    else score -= 10;
-
-    if (currentPrice > m1.ema9) score += 5;
-    else score -= 5;
+    if (m1.close > m1.ema9 && score >= 0) {
+      score += 25;
+      reasons.push("Momentum M1: Konfirmasi Bullish di atas EMA 9");
+    } else if (m1.close < m1.ema9 && score <= 0) {
+      score -= 25;
+      reasons.push("Momentum M1: Konfirmasi Bearish di bawah EMA 9");
+    }
   }
 
   score = Math.max(-100, Math.min(100, score));
 
   // Volatility Gate: Strictly cap SL at 65 pts ($0.65 USD) to protect against broker slippage
-  const atrM5 = m5?.atr || 90;
   let slDistance = 65.0;
   const isVolatilityTooHigh = atrM5 > 220;
 
-  // M5 Trend Gate (Strict Anti-Falling-Knife Protection)
-  const m5Trend = m5
-    ? m5.supertrend === "BULLISH" && currentPrice >= (m5.ema21 || currentPrice)
-      ? "BULLISH"
-      : m5.supertrend === "BEARISH" && currentPrice <= (m5.ema21 || currentPrice)
-      ? "BEARISH"
-      : "NEUTRAL"
-    : "NEUTRAL";
-
   // Room-to-Run & Sideways Gating
-  const sub20 = ratesM5.slice(-20);
+  const sub20 = ratesM5.slice(-21, -1);
   const recentHigh20 = sub20.length > 0 ? Math.max(...sub20.map((c) => c.high)) : currentPrice;
   const recentLow20 = sub20.length > 0 ? Math.min(...sub20.map((c) => c.low)) : currentPrice;
-  const roomToHigh = recentHigh20 - currentPrice;
-  const roomToLow = currentPrice - recentLow20;
+  
+  // Jika harga sudah breakout, ruang gerak bebas terbuka
+  const roomToHigh = currentPrice < recentHigh20 ? Math.max(0, recentHigh20 - currentPrice) : 999.0;
+  const roomToLow = currentPrice > recentLow20 ? Math.max(0, currentPrice - recentLow20) : 999.0;
   const minRoom = 50.0;
 
   const adxM5 = m5?.adx ?? 25.0;
@@ -157,33 +164,33 @@ export function evaluateScalp(
   if (isVolatilityTooHigh) {
     signalType = "PASAR LIAR (TUNGGU)";
     direction = "WAIT";
-    reasons.unshift(`⚠️ Gerakan candle terlalu panjang! Tahan saldo $${capital.toFixed(2)} Anda sampai pasar tenang.`);
+    reasons.unshift(`⚠️ Volatilitas ATR (${atrM5.toFixed(1)}) melebihi batas 220! Tahan saldo $${capital.toFixed(2)} Anda.`);
   } else if (isSideways) {
     signalType = "TUNGGU (PASAR SIDEWAYS)";
     direction = "WAIT";
-    reasons.unshift(`⚠️ Pasar Sideways/Choppy (ADX M5 ${adxM5} < 20). Menahan peluru.`);
+    reasons.unshift(`⚠️ Pasar Sideways / Choppy (ADX M5 ${adxM5} < 15). Menahan peluru.`);
   } else if (score >= CONFIDENCE_THRESHOLD) {
-    if (m5Trend === "BEARISH") {
-      signalType = "TUNGGU (PASAR SIDEWAYS)";
+    if (!isBullRegime) {
+      signalType = "TUNGGU (WAIT)";
       direction = "WAIT";
       reasons.unshift("⛔ Beli Ditolak Keras: Tren M5 sedang Turun (Menolak Membeli Pisau Jatuh).");
     } else if (currentPrice < recentHigh20 && roomToHigh < minRoom) {
       signalType = "TUNGGU (DEKAT RESISTENSI)";
       direction = "WAIT";
-      reasons.unshift(`⚠️ Beli Ditolak: Plafon Resisten M5 hanya +${roomToHigh.toFixed(1)} pts (< ${minRoom} pts). Menghindari beli di pucuk.`);
+      reasons.unshift(`⚠️ Beli Ditolak: Plafon Resisten M5 hanya +${roomToHigh.toFixed(1)} pts (< ${minRoom} pts).`);
     } else {
       signalType = "BELI (BUY)";
       direction = "BUY";
     }
   } else if (score <= -CONFIDENCE_THRESHOLD) {
-    if (m5Trend === "BULLISH") {
-      signalType = "TUNGGU (PASAR SIDEWAYS)";
+    if (!isBearRegime) {
+      signalType = "TUNGGU (WAIT)";
       direction = "WAIT";
       reasons.unshift("⛔ Jual Ditolak Keras: Tren M5 sedang Naik (Menolak Menjual di Tren Kuat).");
     } else if (currentPrice > recentLow20 && roomToLow < minRoom) {
       signalType = "TUNGGU (DEKAT SUPPORT)";
       direction = "WAIT";
-      reasons.unshift(`⚠️ Jual Ditolak: Lantai Support M5 hanya -${roomToLow.toFixed(1)} pts (< ${minRoom} pts). Menghindari jual di lembah.`);
+      reasons.unshift(`⚠️ Jual Ditolak: Lantai Support M5 hanya -${roomToLow.toFixed(1)} pts (< ${minRoom} pts).`);
     } else {
       signalType = "JUAL (SELL)";
       direction = "SELL";

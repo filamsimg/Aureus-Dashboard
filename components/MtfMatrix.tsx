@@ -37,7 +37,13 @@ export default function MtfMatrix({ indicators }: MtfMatrixProps) {
         <div className="space-y-1.5 text-zinc-300">
           <div className="flex justify-between items-center">
             <span className="text-zinc-400">Tren:</span>
-            <span className={`font-bold ${isBull ? "text-emerald-400" : "text-rose-400"}`}>
+            <span
+              className={`font-black px-2 py-0.5 rounded-md text-[11px] ${
+                isBull
+                  ? "text-emerald-400 bg-emerald-500/10 border border-emerald-500/30"
+                  : "text-rose-400 bg-rose-500/10 border border-rose-500/30"
+              }`}
+            >
               {trendText}
             </span>
           </div>
@@ -46,8 +52,8 @@ export default function MtfMatrix({ indicators }: MtfMatrixProps) {
             <span className="text-zinc-100 font-extrabold tabular-nums">{data.rsi7 || data.rsi14}</span>
           </div>
           <div className="flex justify-between items-center">
-            <span className="text-zinc-400">EMA 9:</span>
-            <span className="text-zinc-200 font-bold tabular-nums">${data.ema9 || data.ema50}</span>
+            <span className="text-zinc-400">EMA 21:</span>
+            <span className="text-zinc-200 font-bold tabular-nums">${data.ema21 || data.ema50}</span>
           </div>
         </div>
       </div>
