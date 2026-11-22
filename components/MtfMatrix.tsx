@@ -19,41 +19,65 @@ export default function MtfMatrix({ indicators }: MtfMatrixProps) {
   const renderCol = (tf: string, label: string, data: TechnicalSnapshot | null) => {
     if (!data) {
       return (
-        <div className="bg-zinc-900/80 p-3 rounded-xl border border-zinc-800/70 text-xs sm:text-sm text-zinc-500">
+        <div className="bg-zinc-900/80 p-3.5 rounded-xl border border-zinc-800/70 text-xs sm:text-sm text-zinc-500">
           {tf} Memuat...
         </div>
       );
     }
 
-    const isBull = data.supertrend === "BULLISH";
-    const trendText = isBull ? "Naik (Bull)" : "Turun (Bear)";
+    const isBullSupertrend = data.supertrend === "BULLISH";
+    const isAboveEma = data.close >= (data.ema9 || data.ema21);
+
+    // 4 Kondisi Dinamis & Realistis (Peka terhadap koreksi lilin mikro)
+    let trendLabel = "Naik Kuat (Bull)";
+    let badgeClass = "text-emerald-400 bg-emerald-500/10 border-emerald-500/30";
+
+    if (isBullSupertrend) {
+      if (isAboveEma) {
+        trendLabel = "Naik Kuat (Bull)";
+        badgeClass = "text-emerald-400 bg-emerald-500/10 border-emerald-500/30";
+      } else {
+        trendLabel = "Koreksi Turun";
+        badgeClass = "text-amber-400 bg-amber-500/10 border-amber-500/30";
+      }
+    } else {
+      if (!isAboveEma) {
+        trendLabel = "Turun Kuat (Bear)";
+        badgeClass = "text-rose-400 bg-rose-500/10 border-rose-500/30";
+      } else {
+        trendLabel = "Pantulan Naik";
+        badgeClass = "text-cyan-400 bg-cyan-500/10 border-cyan-500/30";
+      }
+    }
 
     return (
-      <div className="bg-zinc-900/80 p-3 rounded-xl border border-zinc-800/70 text-xs sm:text-sm">
+      <div className="bg-zinc-900/80 p-3.5 rounded-xl border border-zinc-800/70 text-xs sm:text-sm">
         <div className="flex items-center justify-between pb-2 mb-2 border-b border-zinc-800/70">
           <span className="font-extrabold text-sm sm:text-base text-zinc-100">{tf}</span>
           <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">{label}</span>
         </div>
         <div className="space-y-1.5 text-zinc-300">
           <div className="flex justify-between items-center">
-            <span className="text-zinc-400">Tren:</span>
-            <span
-              className={`font-black px-2 py-0.5 rounded-md text-[11px] ${
-                isBull
-                  ? "text-emerald-400 bg-emerald-500/10 border border-emerald-500/30"
-                  : "text-rose-400 bg-rose-500/10 border border-rose-500/30"
-              }`}
-            >
-              {trendText}
+            <span className="text-zinc-400">Arah:</span>
+            <span className={`font-black px-2 py-0.5 rounded-md text-[11px] border ${badgeClass}`}>
+              {trendLabel}
             </span>
           </div>
           <div className="flex justify-between items-center">
-            <span className="text-zinc-400">RSI:</span>
-            <span className="text-zinc-100 font-extrabold tabular-nums">{data.rsi7 || data.rsi14}</span>
+            <span className="text-zinc-400">Harga:</span>
+            <span className="text-zinc-100 font-extrabold tabular-nums">
+              ${data.close.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+            </span>
           </div>
           <div className="flex justify-between items-center">
             <span className="text-zinc-400">EMA 21:</span>
-            <span className="text-zinc-200 font-bold tabular-nums">${data.ema21 || data.ema50}</span>
+            <span className="text-zinc-300 font-bold tabular-nums">
+              ${(data.ema21 || data.ema50).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+            </span>
+          </div>
+          <div className="flex justify-between items-center text-[11px]">
+            <span className="text-zinc-500">RSI 7:</span>
+            <span className="text-zinc-400 font-medium tabular-nums">{data.rsi7 || data.rsi14}</span>
           </div>
         </div>
       </div>

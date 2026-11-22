@@ -984,19 +984,57 @@ class AureusSniperBot:
 
             sign_td = "+" if self.daily_pnl_usd >= 0 else "-"
             cur_signal = self.latest_analysis.get("signal", "TUNGGU (WAIT)")
+            direction = self.latest_analysis.get("direction", "WAIT")
+            score = self.latest_analysis.get("score", 0)
             conf = self.latest_analysis.get("confidencePercent", 0)
-            bot_state = "⏸️ DIJEDA (Ketik /start)" if self.is_paused else "▶️ AKTIF MEMINDAI (24/7)"
+            atr_val = self.latest_analysis.get("atr_m5", 90.0)
+            reasons = self.latest_analysis.get("reasons", [])
+            reasons_fmt = "\n".join([f"• {r}" for r in reasons[:3]]) if reasons else "• Menunggu konfluensi setup valid"
+
+            # Klasifikasi Keputusan Gamblang (Buy / Sell / Tunggu Alasan Apa)
+            if self.circuit_breaker_active:
+                decision_badge = "🛑 KEPUTUSAN: DIKUNCI (REM DARURAT)"
+                action_text = f"Rugi hari ini -${abs(self.daily_pnl_usd):.2f} USD melampaui batas (-${DAILY_LOSS_LIMIT_USD:.2f}). Bot istirahat total untuk melindungi modal."
+            elif self.is_paused:
+                decision_badge = "⏸️ KEPUTUSAN: DIJEDA TELEGRAM"
+                action_text = "Analisa pasar tetap berjalan, tetapi eksekusi order MT5 dikunci. Ketik /start untuk mengaktifkan."
+            elif direction == "BUY":
+                decision_badge = "🟢 KEPUTUSAN: SIAP BUY (0.01 LOT)"
+                action_text = f"Setup BUY terkonfirmasi penuh (Keyakinan: {conf}%). Bot siap membuka posisi beli."
+            elif direction == "SELL":
+                decision_badge = "🔴 KEPUTUSAN: SIAP SELL (0.01 LOT)"
+                action_text = f"Setup SELL terkonfirmasi penuh (Keyakinan: {conf}%). Bot siap membuka posisi jual."
+            elif score > 0:
+                decision_badge = f"🟡 CONDONG BUY ({conf}% / {int(CONFIDENCE_THRESHOLD)}%)"
+                action_text = "Tren Makro NAIK, tetapi bot MENAHAN DIRI menunggu lilin koreksi memantul valid di EMA 21."
+            elif score < 0:
+                decision_badge = f"🟡 CONDONG SELL ({conf}% / {int(CONFIDENCE_THRESHOLD)}%)"
+                action_text = "Tren Makro TURUN, tetapi bot MENAHAN DIRI menunggu lilin pantulan tertahan di bawah EMA 21."
+            else:
+                decision_badge = "⚪ KEPUTUSAN: TUNGGU (PASAR NETRAL)"
+                action_text = "Pasar tidak memiliki arah tren yang jelas (Sideways/Konsolidasi)."
+
+            acc_info_str = ""
+            if MT5_AVAILABLE:
+                acc = mt5.account_info()
+                if acc:
+                    acc_info_str = f"• Saldo Akun  : <b>${acc.balance:.2f} USD</b> (Equity: ${acc.equity:.2f})\n"
+
             return (
-                f"💤 <b>TIDAK ADA POSISI TERBUKA</b>\n"
+                f"🤖 <b>KEPUTUSAN & STATUS BOT SNIPER</b>\n"
                 f"────────────────────────\n"
-                f"Mode Bot    : <b>{bot_state}</b>\n"
-                f"Kesiapan    : <b>{cd_desc}</b>\n"
-                f"Sinyal Live : <b>{cur_signal}</b> ({conf}%)\n"
-                f"Syarat Entry: Konfluensi >= <b>{int(CONFIDENCE_THRESHOLD)}%</b> & Ruang >= {int(MIN_ROOM_TO_RUN_POINTS)} pts\n"
-                f"PnL Hari Ini: <b>{sign_td}${abs(self.daily_pnl_usd):.2f} USD</b>\n"
-                f"Loss Beruntun: {self.daily_consecutive_losses}/{MAX_CONSECUTIVE_LOSS} (Maks -${DAILY_LOSS_LIMIT_USD:.2f})\n"
+                f"🎯 <b>Status : {decision_badge}</b>\n"
+                f"📌 Sinyal : <b>{cur_signal}</b>\n"
+                f"💡 Penjelasan:\n<i>{action_text}</i>\n\n"
+                f"🔍 <b>Kondisi Pasar Terkini:</b>\n"
+                f"{reasons_fmt}\n"
+                f"• Volatilitas : ATR M5 {atr_val} pts (Batas aman: {MAX_ATR_M5_THRESHOLD:.0f})\n\n"
+                f"💼 <b>Status Keuangan Broker:</b>\n"
+                f"{acc_info_str}"
+                f"• PnL Hari Ini : <b>{sign_td}${abs(self.daily_pnl_usd):.2f} USD</b> (Batas: -${DAILY_LOSS_LIMIT_USD:.2f})\n"
+                f"• Kesiapan   : {cd_desc}\n"
                 f"────────────────────────\n"
-                f"<i>Bot siap eksekusi otomatis 0.01 lot saat konfluensi terpenuhi.</i>"
+                f"<i>Bot mengawal modal secara disiplin tanpa emosi.</i>"
             )
 
     def get_balance_text(self) -> str:
