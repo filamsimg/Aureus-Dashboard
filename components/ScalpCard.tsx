@@ -94,7 +94,7 @@ export default function ScalpCard({ signal }: ScalpCardProps) {
             </div>
             <ul className="list-disc list-inside space-y-1.5 text-zinc-300 leading-relaxed text-xs">
               <li>
-                <strong className="text-zinc-100">Eksekusi Otomatis:</strong> Saat keyakinan mencapai <strong>&ge; 65%</strong> dan ruang gerak aman (&ge; 80 poin), bot membuka order 0.01 lot di Exness Real.
+                <strong className="text-zinc-100">Eksekusi Otomatis:</strong> Saat keyakinan mencapai <strong>&ge; 65%</strong> dan ruang gerak aman (&ge; 50 poin), bot membuka order 0.01 lot di Exness Real.
               </li>
               <li>
                 <strong className="text-zinc-100">Proteksi Anti-Pucuk & Anti-Lembah:</strong> Dilarang BUY dekat plafon resistensi dan dilarang SELL dekat lantai support.

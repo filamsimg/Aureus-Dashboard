@@ -72,7 +72,7 @@ SYMBOL_TARGET = os.getenv("SYMBOL_TARGET", "BTCUSDm")
 MAGIC_NUMBER = int(os.getenv("MAGIC_NUMBER", "778898"))
 FIXED_LOT = float(os.getenv("FIXED_LOT", "0.01"))
 
-DEFAULT_SL_POINTS = float(os.getenv("DEFAULT_SL_POINTS", "70.0"))     # 70 poin = -$0.70 USD (Cegah over-loss saat slippage)
+DEFAULT_SL_POINTS = float(os.getenv("DEFAULT_SL_POINTS", "65.0"))     # 65 poin = -$0.65 USD (+ buffer slippage -> max -$0.80)
 TARGET_TP1_POINTS = float(os.getenv("TARGET_TP1_POINTS", "140.0"))   # 140 poin = +$1.40 USD (Kunci Tangga 3)
 TARGET_TP2_POINTS = float(os.getenv("TARGET_TP2_POINTS", "200.0"))   # 200 poin = +$2.00 USD (Runner)
 
@@ -81,8 +81,10 @@ MAX_CONSECUTIVE_LOSS = int(os.getenv("MAX_CONSECUTIVE_LOSS", "2"))
 CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "65.0"))
 COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", "900"))           # 15 menit post-loss
 WIN_COOLDOWN_SECONDS = int(os.getenv("WIN_COOLDOWN_SECONDS", "300"))   # 5 menit post-win (anti-pucuk)
-MIN_ROOM_TO_RUN_POINTS = float(os.getenv("MIN_ROOM_TO_RUN_POINTS", "80.0"))
-ADX_CHOP_THRESHOLD = float(os.getenv("ADX_CHOP_THRESHOLD", "20.0"))
+MIN_ROOM_TO_RUN_POINTS = float(os.getenv("MIN_ROOM_TO_RUN_POINTS", "50.0")) # 50 pts cukup untuk scalping pullback
+ADX_CHOP_THRESHOLD = float(os.getenv("ADX_CHOP_THRESHOLD", "15.0"))    # Hanya blokir pasar mati sejati
+MAX_ATR_M5_THRESHOLD = 220.0                                          # Toleransi volatilitas BTC realistis
+WATCHDOG_MAX_LOSS_USD = 0.85                                          # Cut loss darurat mutlak Soft Watchdog
 
 # ==========================================
 # 2. TELEGRAM CLIENT (CLEAN COMMANDS)
@@ -339,27 +341,33 @@ class AureusSniperBot:
             "circuit_breaker": self.circuit_breaker_active,
         }
 
-        # Tangga 1: +60 poin -> Kunci +30 poin (+0.30 USD Untung Bersih - Anti Reversal)
-        if pnl_pts >= 60.0 and self.ladder_stage < 1:
-            target_sl = round(entry + 30.0 if is_buy else entry - 30.0, 2)
-            if (is_buy and target_sl > cur_sl) or (not is_buy and (cur_sl == 0 or target_sl < cur_sl)):
-                if self._modify_sl(pos, target_sl, cur_tp):
-                    self.ladder_stage = 1
+        # Soft Watchdog: Cut loss darurat mutlak jika floating loss mencapai batas toleransi
+        if pnl_usd <= -WATCHDOG_MAX_LOSS_USD:
+            logger.warning(f"Watchdog trigger: Loss -${abs(pnl_usd):.2f} melampaui batas toleransi -${WATCHDOG_MAX_LOSS_USD:.2f} USD. Market close darurat!")
+            self._close_position_market(pos)
+            return
+
+        # Tangga 3: +140 poin -> Kunci +100 poin (+1.00 USD), lepas ke TP2 (+200 pts)
+        if pnl_pts >= 140.0 and self.ladder_stage < 3:
+            target_sl = round(entry + 100.0 if is_buy else entry - 100.0, 2)
+            target_tp2 = round(entry + TARGET_TP2_POINTS if is_buy else entry - TARGET_TP2_POINTS, 2)
+            if (is_buy and target_sl > cur_sl + 5.0) or (not is_buy and (cur_sl == 0 or target_sl < cur_sl - 5.0)):
+                if self._modify_sl(pos, target_sl, target_tp2):
+                    self.ladder_stage = 3
                     msg = (
-                        f"🛡️ <b>[TANGGA 1] PROFIT TERKUNCI (+60 PTS)!</b>\n"
+                        f"🎯 <b>[TANGGA 3] TP1 TEMBUS — KUNCI +$1.00 USD!</b>\n"
                         f"────────────────────────\n"
                         f"Pair     : {SYMBOL_TARGET} ({self.pos_type})\n"
-                        f"Floating : +${pnl_pts * 0.01:.2f} USD\n"
-                        f"Aksi     : SL digeser ke <b>${target_sl:,.2f}</b> (+30 pts)\n"
-                        f"Status   : <b>+$0.30 USD Terjamin Masuk Saldo!</b>\n"
-                        f"Target   : Menuju Tangga 2 (+100 pts)"
+                        f"Aksi     : SL di-lock di level +100 pts (${target_sl:,.2f})\n"
+                        f"Status   : <b>+$1.00 USD Milik Anda!</b>\n"
+                        f"Next     : Posisi bebas berlari mengejar TP2 (+$2.00)"
                     )
                     self.telegram.send(msg)
 
         # Tangga 2: +100 poin -> Kunci +60 poin (+0.60 USD Untung Bersih)
-        if pnl_pts >= 100.0 and self.ladder_stage < 2:
+        elif pnl_pts >= 100.0 and self.ladder_stage < 2:
             target_sl = round(entry + 60.0 if is_buy else entry - 60.0, 2)
-            if (is_buy and target_sl > cur_sl) or (not is_buy and (cur_sl == 0 or target_sl < cur_sl)):
+            if (is_buy and target_sl > cur_sl + 5.0) or (not is_buy and (cur_sl == 0 or target_sl < cur_sl - 5.0)):
                 if self._modify_sl(pos, target_sl, cur_tp):
                     self.ladder_stage = 2
                     msg = (
@@ -373,22 +381,45 @@ class AureusSniperBot:
                     )
                     self.telegram.send(msg)
 
-        # Tangga 3: +140 poin -> Kunci +100 poin (+1.00 USD), lepas ke TP2 (+200 pts)
-        if pnl_pts >= 140.0 and self.ladder_stage < 3:
-            target_sl = round(entry + 100.0 if is_buy else entry - 100.0, 2)
-            target_tp2 = round(entry + TARGET_TP2_POINTS if is_buy else entry - TARGET_TP2_POINTS, 2)
-            if (is_buy and target_sl > cur_sl) or (not is_buy and (cur_sl == 0 or target_sl < cur_sl)):
-                if self._modify_sl(pos, target_sl, target_tp2):
-                    self.ladder_stage = 3
+        # Tangga 1: +60 poin -> Kunci +30 poin (+0.30 USD Untung Bersih - Anti Reversal)
+        elif pnl_pts >= 60.0 and self.ladder_stage < 1:
+            target_sl = round(entry + 30.0 if is_buy else entry - 30.0, 2)
+            if (is_buy and target_sl > cur_sl + 5.0) or (not is_buy and (cur_sl == 0 or target_sl < cur_sl - 5.0)):
+                if self._modify_sl(pos, target_sl, cur_tp):
+                    self.ladder_stage = 1
                     msg = (
-                        f"🎯 <b>[TANGGA 3] TP1 TEMBUS — KUNCI +$1.00 USD!</b>\n"
+                        f"🛡️ <b>[TANGGA 1] PROFIT TERKUNCI (+60 PTS)!</b>\n"
                         f"────────────────────────\n"
                         f"Pair     : {SYMBOL_TARGET} ({self.pos_type})\n"
-                        f"Aksi     : SL di-lock di level +100 pts (${target_sl:,.2f})\n"
-                        f"Status   : <b>+$1.00 USD Milik Anda!</b>\n"
-                        f"Next     : Posisi bebas berlari mengejar TP2 (+$2.00)"
+                        f"Floating : +${pnl_pts * 0.01:.2f} USD\n"
+                        f"Aksi     : SL digeser ke <b>${target_sl:,.2f}</b> (+30 pts)\n"
+                        f"Status   : <b>+$0.30 USD Terjamin Masuk Saldo!</b>\n"
+                        f"Target   : Menuju Tangga 2 (+100 pts)"
                     )
                     self.telegram.send(msg)
+
+    def _close_position_market(self, pos) -> bool:
+        """Emergency watchdog close order to cap losses."""
+        order_type = mt5.ORDER_TYPE_SELL if pos.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
+        tick = mt5.symbol_info_tick(pos.symbol)
+        if not tick:
+            return False
+        price = tick.bid if pos.type == mt5.ORDER_TYPE_BUY else tick.ask
+        req = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "position": pos.ticket,
+            "symbol": pos.symbol,
+            "volume": float(pos.volume),
+            "type": order_type,
+            "price": float(price),
+            "deviation": 25,
+            "magic": MAGIC_NUMBER,
+            "comment": "Watchdog Emergency Cut",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+        res = mt5.order_send(req)
+        return res is not None and res.retcode == mt5.TRADE_RETCODE_DONE
 
     def _modify_sl(self, pos, new_sl: float, new_tp: float) -> bool:
         req = {
@@ -460,116 +491,89 @@ class AureusSniperBot:
         if len(candles_m5) < 30:
             return
 
-        closes_m5 = [c["close"] for c in candles_m5]
-        highs_m5 = [c["high"] for c in candles_m5]
-        lows_m5 = [c["low"] for c in candles_m5]
+        # 1. Closed Candle Selection (Gunakan Bar M5 yang selesai tertutup)
+        c_prev = candles_m5[-2]  # Bar M5 selesai (Closed Candle)
+        c_prev2 = candles_m5[-3] if len(candles_m5) >= 3 else c_prev
+        
+        closes_m5 = [c["close"] for c in candles_m5[:-1]] # Selesai
+        highs_m5 = [c["high"] for c in candles_m5[:-1]]
+        lows_m5 = [c["low"] for c in candles_m5[:-1]]
 
-        # 1. Proteksi Volatilitas (ATR M5)
+        # Proteksi Volatilitas (ATR M5 realistis)
         ranges = [h - l for h, l in zip(highs_m5[-14:], lows_m5[-14:])]
         atr_m5 = sum(ranges) / len(ranges) if ranges else 90.0
+        adx_m5 = self._calculate_adx(candles_m5[:-1], 14)
 
-        is_wild = (atr_m5 > 160.0)
-
-        # 2. Indikator M15 Trend Filter (Bobot 30%)
-        score = 0
-        reasons = []
-
-        if len(candles_m15) >= 20:
-            closes_m15 = [c["close"] for c in candles_m15]
-            ema9_m15 = self._calc_ema(closes_m15, 9)
-            ema21_m15 = self._calc_ema(closes_m15, 21)
-            ema50_m15 = self._calc_ema(closes_m15, 50) if len(closes_m15) >= 50 else ema21_m15
-            
-            if ema9_m15 > ema21_m15 > ema50_m15:
-                score += 15
-                reasons.append("Tren M15 Naik (EMA 9 > 21 > 50)")
-            elif ema9_m15 < ema21_m15 < ema50_m15:
-                score -= 15
-                reasons.append("Tren M15 Turun (EMA 9 < 21 < 50)")
-
-            st_m15 = self._calc_supertrend(candles_m15)
-            if st_m15 == "BULLISH":
-                score += 10
-            else:
-                score -= 10
-
-        # 3. Indikator M5 Setup & Trend Lock (Bobot 40%)
-        ema9_m5 = self._calc_ema(closes_m5, 9)
-        ema21_m5 = self._calc_ema(closes_m5, 21)
-        st_m5 = self._calc_supertrend(candles_m5)
-
-        m5_trend = "BULLISH" if (st_m5 == "BULLISH" and closes_m5[-1] >= ema21_m5) else \
-                   "BEARISH" if (st_m5 == "BEARISH" and closes_m5[-1] <= ema21_m5) else "NEUTRAL"
-
-        if m5_trend == "BULLISH":
-            score += 15
-            reasons.append("Tren M5 Naik (SuperTrend Hijau & Di Atas EMA 21)")
-        elif m5_trend == "BEARISH":
-            score -= 15
-            reasons.append("Tren M5 Turun (SuperTrend Merah & Di Bawah EMA 21)")
-
-        # RSI 7 M5 Filter (Rebound Hook Confirmation - Bukan Blind Falling Knife)
-        rsi7_m5 = self._calc_rsi(closes_m5, 7)
-        rsi7_prev = self._calc_rsi(closes_m5[:-1], 7)
-        if rsi7_m5 <= 30.0:
-            if rsi7_m5 > rsi7_prev:
-                score += 15
-                reasons.append(f"RSI M5 Rebound Naik ({rsi7_m5:.1f} > {rsi7_prev:.1f})")
-            else:
-                reasons.append(f"RSI M5 Oversold ({rsi7_m5:.1f}) - Tekanan Jual Masih Berlanjut")
-        elif rsi7_m5 >= 70.0:
-            if rsi7_m5 < rsi7_prev:
-                score -= 15
-                reasons.append(f"RSI M5 Berbalik Turun ({rsi7_m5:.1f} < {rsi7_prev:.1f})")
-            else:
-                reasons.append(f"RSI M5 Overbought ({rsi7_m5:.1f}) - Tekanan Beli Masih Berlanjut")
-
-        # MACD Hist M5
-        macd_hist = self._calc_macd_hist(closes_m5)
-        if macd_hist > 0:
-            score += 10
-        else:
-            score -= 10
-
-        # Pin Bar M5 (HANYA Evaluasi Candle Selesai [-2] agar bebas dari kedipan harga palsu)
-        confirmed_c = candles_m5[-2] if len(candles_m5) >= 2 else candles_m5[-1]
-        c_body = abs(confirmed_c["close"] - confirmed_c["open"])
-        c_range = max(0.1, confirmed_c["high"] - confirmed_c["low"])
-        lower_wick = min(confirmed_c["open"], confirmed_c["close"]) - confirmed_c["low"]
-        upper_wick = confirmed_c["high"] - max(confirmed_c["open"], confirmed_c["close"])
-
-        if lower_wick > c_body * 2.0 and lower_wick / c_range > 0.5:
-            score += 10
-            reasons.append("Konfirmasi Candle M5: Rejection Bawah (Buyer Masuk)")
-        elif upper_wick > c_body * 2.0 and upper_wick / c_range > 0.5:
-            score -= 10
-            reasons.append("Konfirmasi Candle M5: Rejection Atas (Seller Masuk)")
-
-        # 4. Indikator M1 Trigger (Bobot 20%)
-        if len(candles_m1) >= 15:
-            closes_m1 = [c["close"] for c in candles_m1]
-            st_m1 = self._calc_supertrend(candles_m1)
-            if st_m1 == "BULLISH":
-                score += 10
-            else:
-                score -= 10
-
-            ema9_m1 = self._calc_ema(closes_m1, 9)
-            if closes_m1[-1] > ema9_m1:
-                score += 5
-            else:
-                score -= 5
-
-        # 5. Deteksi Konsolidasi/Sideways (ADX M5)
-        adx_m5 = self._calculate_adx(candles_m5, 14)
+        is_wild = (atr_m5 > MAX_ATR_M5_THRESHOLD)
         is_sideways = (adx_m5 < ADX_CHOP_THRESHOLD)
 
-        # 6. Room-to-Run (Plafon Resistensi & Lantai Support 20 Candle M5)
-        sub_20 = candles_m5[-20:]
-        recent_high_20 = max(c["high"] for c in sub_20)
-        recent_low_20 = min(c["low"] for c in sub_20)
-        cur_price = current_tick.get("ask" if score >= 0 else "bid", closes_m5[-1])
+        # 2. Rezim Tren Makro M15 & M5 (Bobot 35%)
+        score = 0
+        reasons = []
+        st_m15 = self._calc_supertrend(candles_m15)
+        st_m5 = self._calc_supertrend(candles_m5[:-1])
+        ema21_m5 = self._calc_ema(closes_m5, 21)
+        ema50_m5 = self._calc_ema(closes_m5, 50) if len(closes_m5) >= 50 else ema21_m5
 
+        is_bull_regime = (st_m15 == "BULLISH" and (st_m5 == "BULLISH" or ema21_m5 > ema50_m5))
+        is_bear_regime = (st_m15 == "BEARISH" and (st_m5 == "BEARISH" or ema21_m5 < ema50_m5))
+
+        if is_bull_regime:
+            score += 35
+            reasons.append("Rezim Tren Bullish (M15 & M5 Selaras)")
+        elif is_bear_regime:
+            score -= 35
+            reasons.append("Rezim Tren Bearish (M15 & M5 Selaras)")
+
+        # 3. Pullback Zone & Trigger Rebound EMA 21 (Bobot 40%)
+        body_prev = abs(c_prev["close"] - c_prev["open"])
+        lower_wick = min(c_prev["open"], c_prev["close"]) - c_prev["low"]
+        upper_wick = c_prev["high"] - max(c_prev["open"], c_prev["close"])
+        
+        rsi7_m5 = self._calc_rsi(closes_m5, 7)
+        rsi7_prev = self._calc_rsi(closes_m5[:-1], 7)
+
+        # Setup BUY Rebound:
+        # Harga menguji EMA 21, candle [-2] ditutup hijau di atas EMA 21 dengan rejection bawah/engulfing
+        touched_ema21_buy = (c_prev["low"] <= (ema21_m5 + 0.25 * atr_m5))
+        rebound_buy_confirmed = (
+            c_prev["close"] > c_prev["open"] and           # Candle Hijau
+            c_prev["close"] >= ema21_m5 and                 # Bertahan di atas EMA 21
+            (lower_wick >= 0.8 * body_prev or c_prev["close"] > c_prev2["high"]) and # Rejection/Engulfing
+            38.0 <= rsi7_m5 <= 60.0 and rsi7_m5 >= rsi7_prev # Rebound RSI di zona tren
+        )
+
+        # Setup SELL Rebound:
+        touched_ema21_sell = (c_prev["high"] >= (ema21_m5 - 0.25 * atr_m5))
+        rebound_sell_confirmed = (
+            c_prev["close"] < c_prev["open"] and           # Candle Merah
+            c_prev["close"] <= ema21_m5 and                 # Tertahan di bawah EMA 21
+            (upper_wick >= 0.8 * body_prev or c_prev["close"] < c_prev2["low"]) and # Rejection/Engulfing
+            40.0 <= rsi7_m5 <= 62.0 and rsi7_m5 <= rsi7_prev
+        )
+
+        if is_bull_regime and touched_ema21_buy and rebound_buy_confirmed:
+            score += 40
+            reasons.append("Trigger: Rebound Terkonfirmasi di EMA 21 M5 (Closed Candle)")
+        elif is_bear_regime and touched_ema21_sell and rebound_sell_confirmed:
+            score -= 40
+            reasons.append("Trigger: Rejection Terkonfirmasi di EMA 21 M5 (Closed Candle)")
+
+        # 4. Trigger Cepat M1 Momentum (Bobot 25%)
+        if len(candles_m1) >= 15:
+            closes_m1 = [c["close"] for c in candles_m1]
+            ema9_m1 = self._calc_ema(closes_m1, 9)
+            if closes_m1[-1] > ema9_m1:
+                score += 25
+            elif closes_m1[-1] < ema9_m1:
+                score -= 25
+
+        # 5. Room to Run Filter (50 pts dari Swing M5)
+        sub20 = candles_m5[-21:-1]
+        recent_high_20 = max(c["high"] for c in sub20) if sub20 else c_prev["close"]
+        recent_low_20 = min(c["low"] for c in sub20) if sub20 else c_prev["close"]
+        cur_price = current_tick.get("ask" if score >= 0 else "bid", c_prev["close"])
+        
         room_to_high = recent_high_20 - cur_price
         room_to_low = cur_price - recent_low_20
 
@@ -583,34 +587,32 @@ class AureusSniperBot:
         if is_wild:
             signal_type = "PASAR LIAR (TUNGGU)"
             direction = "WAIT"
-            reasons.insert(0, f"Volatilitas ATR ({atr_m5:.1f}) melebihi batas 160! Tahan saldo Anda.")
+            reasons.insert(0, f"Volatilitas ATR ({atr_m5:.1f}) melebihi batas {MAX_ATR_M5_THRESHOLD:.0f}! Tahan saldo Anda.")
         elif is_sideways:
             signal_type = "TUNGGU (PASAR SIDEWAYS)"
             direction = "WAIT"
             reasons.insert(0, f"Pasar Sideways / Choppy (ADX M5 {adx_m5:.1f} < {ADX_CHOP_THRESHOLD:.0f}). Menahan peluru.")
         elif score >= CONFIDENCE_THRESHOLD:
-            # HARD TREND GATE: DILARANG MEMBELI JIKA TREN M5 SEDANG BEARISH
-            if m5_trend == "BEARISH":
+            if not is_bull_regime:
                 direction = "WAIT"
                 signal_type = "TUNGGU (TREN M5 TURUN)"
                 reasons.insert(0, "⛔ Beli Ditolak Keras: Tren M5 sedang Turun (Menolak Membeli Pisau Jatuh).")
             elif cur_price < recent_high_20 and room_to_high < MIN_ROOM_TO_RUN_POINTS:
                 signal_type = "TUNGGU (DEKAT RESISTENSI)"
                 direction = "WAIT"
-                reasons.insert(0, f"Beli Ditolak: Plafon Resisten M5 hanya +{room_to_high:.1f} pts (< {MIN_ROOM_TO_RUN_POINTS:.0f} pts). Menghindari beli di pucuk.")
+                reasons.insert(0, f"Beli Ditolak: Plafon Resisten M5 hanya +{room_to_high:.1f} pts (< {MIN_ROOM_TO_RUN_POINTS:.0f} pts).")
             else:
                 direction = "BUY"
                 signal_type = "BELI (BUY)"
         elif score <= -CONFIDENCE_THRESHOLD:
-            # HARD TREND GATE: DILARANG MENJUAL JIKA TREN M5 SEDANG BULLISH
-            if m5_trend == "BULLISH":
+            if not is_bear_regime:
                 direction = "WAIT"
                 signal_type = "TUNGGU (TREN M5 NAIK)"
                 reasons.insert(0, "⛔ Jual Ditolak Keras: Tren M5 sedang Naik (Menolak Menjual di Tren Kuat).")
             elif cur_price > recent_low_20 and room_to_low < MIN_ROOM_TO_RUN_POINTS:
                 signal_type = "TUNGGU (DEKAT SUPPORT)"
                 direction = "WAIT"
-                reasons.insert(0, f"Jual Ditolak: Lantai Support M5 hanya -{room_to_low:.1f} pts (< {MIN_ROOM_TO_RUN_POINTS:.0f} pts). Menghindari jual di lembah.")
+                reasons.insert(0, f"Jual Ditolak: Lantai Support M5 hanya -{room_to_low:.1f} pts (< {MIN_ROOM_TO_RUN_POINTS:.0f} pts).")
             else:
                 direction = "SELL"
                 signal_type = "JUAL (SELL)"

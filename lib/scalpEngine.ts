@@ -125,10 +125,10 @@ export function evaluateScalp(
 
   score = Math.max(-100, Math.min(100, score));
 
-  // Volatility Gate: Strictly cap SL at 70 pts ($0.70 USD) to protect against broker slippage
+  // Volatility Gate: Strictly cap SL at 65 pts ($0.65 USD) to protect against broker slippage
   const atrM5 = m5?.atr || 90;
-  let slDistance = 70.0;
-  const isVolatilityTooHigh = atrM5 > 140;
+  let slDistance = 65.0;
+  const isVolatilityTooHigh = atrM5 > 220;
 
   // M5 Trend Gate (Strict Anti-Falling-Knife Protection)
   const m5Trend = m5
@@ -145,10 +145,10 @@ export function evaluateScalp(
   const recentLow20 = sub20.length > 0 ? Math.min(...sub20.map((c) => c.low)) : currentPrice;
   const roomToHigh = recentHigh20 - currentPrice;
   const roomToLow = currentPrice - recentLow20;
-  const minRoom = 80.0;
+  const minRoom = 50.0;
 
   const adxM5 = m5?.adx ?? 25.0;
-  const isSideways = adxM5 < 20.0;
+  const isSideways = adxM5 < 15.0;
   const CONFIDENCE_THRESHOLD = 65;
 
   let signalType: ScalpSignal["signal"] = "TUNGGU (WAIT)";

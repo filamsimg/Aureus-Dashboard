@@ -20,7 +20,7 @@ Setiap kali ada penyesuaian kode, agen wajib melakukan sinkronisasi dua pintu:
 ---
 
 ## 3. Filosofi Otonom 24/7 (Tanpa Intervensi Manual)
-- **Eksekusi 100% Otomatis**: Bot di VPS mengeksekusi order 0.01 lot di Exness Real secara mandiri saat konfluensi sinyal $\ge 65\%$, ruang gerak $\ge 80\text{ pts}$, ADX M5 $\ge 20$, dan tren M5 selaras (Hard Trend Gate: SuperTrend & EMA 21, Dilarang Counter-Trend/Pisau Jatuh). SL awal dikunci di 70 poin (-$0.70 USD) untuk meredam slippage broker.
+- **Eksekusi 100% Otomatis**: Bot di VPS mengeksekusi order 0.01 lot di Exness Real secara mandiri saat konfluensi sinyal $\ge 65\%$, ruang gerak $\ge 50\text{ pts}$, ADX M5 $\ge 15$, dan Rebound EMA 21 M5 terkonfirmasi pada closed candle. SL awal dikunci di 65 poin (-$0.65 USD) dengan pengaman Soft Watchdog (-$0.85 USD) untuk meredam slippage broker.
 - **Jurnal Otomatis**: Riwayat transaksi ditarik otomatis dari riwayat deal resmi broker MT5 (`/api/history`). DILARANG membuat tombol manual *"Salin Parameter"* atau *"Simpan ke Jurnal"*.
 - **Kendali Satu Pintu Telegram**: Master switch trading hanya dikendalikan via chat Telegram pribadi (`@AureusAITraderBot`):
   - `/stop`: Mengunci eksekusi order MT5 (radar analisa di web tetap membaca pasar).
