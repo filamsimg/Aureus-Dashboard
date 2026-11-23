@@ -212,33 +212,78 @@ def mt5_worker_loop(sniper_bot=None):
                 except Exception as bot_err:
                     logger.error(f"Error pada siklus Sniper Bot: {bot_err}")
 
-            # 5. Sinkronisasi Deals History MT5 setiap 5 detik
+            # 5. Sinkronisasi Deals History MT5 setiap 5 detik (Rekonstruksi Transaksi Selesai)
             now = time.time()
             if now - last_history_fetch >= 5:
                 last_history_fetch = now
                 try:
                     dt_now = datetime.now()
-                    deals = mt5.history_deals_get(dt_now - timedelta(days=7), dt_now + timedelta(days=1))
+                    # Ambil riwayat deals hingga 30 hari ke belakang tanpa limit kerdil
+                    deals = mt5.history_deals_get(dt_now - timedelta(days=30), dt_now + timedelta(days=1))
                     if deals:
+                        trades_map = {}
+                        magic_bot = int(os.getenv("MAGIC_NUMBER", "778898"))
+                        for d in deals:
+                            if not d.symbol:
+                                continue
+                            pid = d.position_id if d.position_id != 0 else d.order
+                            if pid not in trades_map:
+                                trades_map[pid] = {
+                                    "ticket": pid,
+                                    "order": d.order,
+                                    "symbol": d.symbol,
+                                    "time_open": d.time,
+                                    "time_close": d.time,
+                                    "type": "BUY" if d.type == 0 else "SELL",
+                                    "volume": round(float(d.volume), 2),
+                                    "price": round(float(d.price), 2),
+                                    "exit_price": round(float(d.price), 2),
+                                    "profit": round(float(d.profit), 2),
+                                    "magic": d.magic,
+                                    "comment": d.comment or "",
+                                    "is_closed": (d.entry != 0),
+                                }
+                            else:
+                                t = trades_map[pid]
+                                if d.entry == 0:
+                                    t["time_open"] = d.time
+                                    t["price"] = round(float(d.price), 2)
+                                    t["type"] = "BUY" if d.type == 0 else "SELL"
+                                    if d.magic != 0:
+                                        t["magic"] = d.magic
+                                    if d.comment and not t["comment"]:
+                                        t["comment"] = d.comment
+                                else:
+                                    t["time_close"] = d.time
+                                    t["exit_price"] = round(float(d.price), 2)
+                                    t["profit"] = round(float(t["profit"] + d.profit), 2)
+                                    t["is_closed"] = True
+                                    if d.magic != 0:
+                                        t["magic"] = d.magic
+                                    if d.comment:
+                                        t["comment"] = f"{t['comment']} -> {d.comment}" if t['comment'] else d.comment
+
                         hist_list = []
-                        # Ambil deal keluar (DEAL_ENTRY_OUT) atau deal selesai
-                        for d in reversed(deals[-40:]):
-                            d_dict = d._asdict()
-                            hist_list.append({
-                                "ticket": d_dict.get("ticket"),
-                                "order": d_dict.get("order"),
-                                "time": int(d_dict.get("time")),
-                                "symbol": d_dict.get("symbol"),
-                                "type": "BUY" if d_dict.get("type") == 0 else "SELL",
-                                "entry": "IN" if d_dict.get("entry") == 0 else "OUT",
-                                "volume": round(float(d_dict.get("volume", 0.01)), 2),
-                                "price": round(float(d_dict.get("price", 0.0)), 2),
-                                "profit": round(float(d_dict.get("profit", 0.0)), 2),
-                                "comment": d_dict.get("comment", ""),
-                                "magic": d_dict.get("magic", 0),
-                                "is_bot": (d_dict.get("magic") == int(os.getenv("MAGIC_NUMBER", "778898"))),
-                            })
-                        LATEST_STATE["history"] = hist_list
+                        # Masukkan transaksi selesai yang sudah tuntas (closed), urutkan dari yang terbaru
+                        for t in reversed(list(trades_map.values())):
+                            if t["is_closed"]:
+                                hist_list.append({
+                                    "ticket": t["ticket"],
+                                    "order": t["order"],
+                                    "time": int(t["time_close"]),
+                                    "symbol": t["symbol"],
+                                    "type": t["type"],
+                                    "entry": "OUT",
+                                    "volume": t["volume"],
+                                    "price": t["price"],
+                                    "exit_price": t["exit_price"],
+                                    "profit": t["profit"],
+                                    "comment": t["comment"],
+                                    "magic": t["magic"],
+                                    "is_bot": (t["magic"] == magic_bot),
+                                })
+
+                        LATEST_STATE["history"] = hist_list[:500]
                 except Exception as hist_err:
                     logger.warning(f"Error fetch history deals: {hist_err}")
 
