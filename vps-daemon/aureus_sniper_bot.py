@@ -249,10 +249,11 @@ class AureusSniperBot:
         self.circuit_breaker_active = False
         self.last_loss_time = 0.0
         self.last_win_time = 0.0
+        self.last_entered_candle_time = 0
 
         # Posisi aktif tracking
         self.tracked_ticket = None
-        self.ladder_stage = 0  # 0: None, 1: 50%, 2: 75%, 3: 100%
+        self.ladder_stage = 0  # 0: None, 1: Breakeven (+80 pts), 2: Lock Profit (+120 pts)
         self.entry_price = 0.0
         self.pos_type = None   # "BUY" or "SELL"
 
@@ -435,8 +436,8 @@ class AureusSniperBot:
 
         pnl_pts = (cur_price - entry) if is_buy else (entry - cur_price)
         pnl_usd = round(pnl_pts * 0.01, 2)
-        stages = ["Memantau Tangga 1 (+60)", "Tangga 1 (+30 pts Lock)", "Tangga 2 (+60 pts Lock)", "Tangga 3 (+100 pts Lock)"]
-        stage_desc = stages[min(self.ladder_stage, 3)]
+        stages = ["Memantau Breakeven (+80)", "Breakeven Terkunci (+15 pts)", "Profit Terkunci (+80 pts)"]
+        stage_desc = stages[min(self.ladder_stage, 2)]
 
         # Update latest_analysis saat ada posisi aktif agar Web Dashboard sinkron sempurna
         self.latest_analysis = {
@@ -449,7 +450,7 @@ class AureusSniperBot:
             "reasons": [
                 f"Order #{ticket} {self.pos_type} 0.01 lot di ${entry:,.2f}",
                 f"Floating PnL: {'+' if pnl_usd >= 0 else ''}${pnl_usd:.2f} USD",
-                f"Status Tangga: {stage_desc}"
+                f"Status Kawalan: {stage_desc}"
             ],
             "updated_at": int(time.time()),
             "is_paused": self.is_paused,
@@ -457,60 +458,43 @@ class AureusSniperBot:
             "circuit_breaker": self.circuit_breaker_active,
         }
 
-        # Soft Watchdog: Cut loss darurat mutlak jika floating loss mencapai batas toleransi
+        # Soft Watchdog: Cut loss darurat mutlak jika floating loss mencapai batas toleransi slippage
         if pnl_usd <= -WATCHDOG_MAX_LOSS_USD:
             logger.warning(f"Watchdog trigger: Loss -${abs(pnl_usd):.2f} melampaui batas toleransi -${WATCHDOG_MAX_LOSS_USD:.2f} USD. Market close darurat!")
             self._close_position_market(pos)
             return
 
-        # Tangga 3: +140 poin -> Kunci +100 poin (+1.00 USD), lepas ke TP2 (+200 pts)
-        if pnl_pts >= 140.0 and self.ladder_stage < 3:
-            target_sl = round(entry + 100.0 if is_buy else entry - 100.0, 2)
-            target_tp2 = round(entry + TARGET_TP2_POINTS if is_buy else entry - TARGET_TP2_POINTS, 2)
-            if (is_buy and target_sl > cur_sl + 5.0) or (not is_buy and (cur_sl == 0 or target_sl < cur_sl - 5.0)):
-                if self._modify_sl(pos, target_sl, target_tp2):
-                    self.ladder_stage = 3
-                    msg = (
-                        f"🎯 <b>[TANGGA 3] TP1 TEMBUS — KUNCI +$1.00 USD!</b>\n"
-                        f"────────────────────────\n"
-                        f"Pair     : {SYMBOL_TARGET} ({self.pos_type})\n"
-                        f"Aksi     : SL di-lock di level +100 pts (${target_sl:,.2f})\n"
-                        f"Status   : <b>+$1.00 USD Milik Anda!</b>\n"
-                        f"Next     : Posisi bebas berlari mengejar TP2 (+$2.00)"
-                    )
-                    self.telegram.send(msg)
-
-        # Tangga 2: +100 poin -> Kunci +60 poin (+0.60 USD Untung Bersih)
-        elif pnl_pts >= 100.0 and self.ladder_stage < 2:
-            target_sl = round(entry + 60.0 if is_buy else entry - 60.0, 2)
+        # Stage 2: Profit sudah +120 poin -> Kunci +80 poin (+0.80 USD untung bersih), siap jemput TP (+140)
+        if pnl_pts >= 120.0 and self.ladder_stage < 2:
+            target_sl = round(entry + 80.0 if is_buy else entry - 80.0, 2)
             if (is_buy and target_sl > cur_sl + 5.0) or (not is_buy and (cur_sl == 0 or target_sl < cur_sl - 5.0)):
                 if self._modify_sl(pos, target_sl, cur_tp):
                     self.ladder_stage = 2
                     msg = (
-                        f"🚀 <b>[TANGGA 2] PROFIT 60% TERKUNCI (+100 PTS)!</b>\n"
+                        f"🚀 <b>[PROFIT DIKUNCI (+120 PTS)]</b>\n"
                         f"────────────────────────\n"
                         f"Pair     : {SYMBOL_TARGET} ({self.pos_type})\n"
-                        f"Floating : +${pnl_pts * 0.01:.2f} USD\n"
-                        f"Aksi     : SL dinaikkan ke <b>${target_sl:,.2f}</b> (+60 pts)\n"
-                        f"Status   : <b>+$0.60 USD Sukses Diamankan!</b>\n"
-                        f"Target   : Menuju Tangga 3 (+140 pts)"
+                        f"Floating : +${pnl_usd:.2f} USD\n"
+                        f"Aksi     : SL dinaikkan ke <b>${target_sl:,.2f}</b> (+80 pts)\n"
+                        f"Status   : <b>+$0.80 USD Sukses Diamankan!</b>\n"
+                        f"Target   : Menuju TP1 (+140 pts = +$1.40 USD)"
                     )
                     self.telegram.send(msg)
 
-        # Tangga 1: +60 poin -> Kunci +30 poin (+0.30 USD Untung Bersih - Anti Reversal)
-        elif pnl_pts >= 60.0 and self.ladder_stage < 1:
-            target_sl = round(entry + 30.0 if is_buy else entry - 30.0, 2)
+        # Stage 1: Profit sudah +80 poin -> Kunci Breakeven (+15 pts buffer)
+        elif pnl_pts >= 80.0 and self.ladder_stage < 1:
+            target_sl = round(entry + 15.0 if is_buy else entry - 15.0, 2)
             if (is_buy and target_sl > cur_sl + 5.0) or (not is_buy and (cur_sl == 0 or target_sl < cur_sl - 5.0)):
                 if self._modify_sl(pos, target_sl, cur_tp):
                     self.ladder_stage = 1
                     msg = (
-                        f"🛡️ <b>[TANGGA 1] PROFIT TERKUNCI (+60 PTS)!</b>\n"
+                        f"🛡️ <b>[BREAKEVEN TERKUNCI (+80 PTS)]</b>\n"
                         f"────────────────────────\n"
                         f"Pair     : {SYMBOL_TARGET} ({self.pos_type})\n"
-                        f"Floating : +${pnl_pts * 0.01:.2f} USD\n"
-                        f"Aksi     : SL digeser ke <b>${target_sl:,.2f}</b> (+30 pts)\n"
-                        f"Status   : <b>+$0.30 USD Terjamin Masuk Saldo!</b>\n"
-                        f"Target   : Menuju Tangga 2 (+100 pts)"
+                        f"Floating : +${pnl_usd:.2f} USD\n"
+                        f"Aksi     : SL digeser ke Titik Impas <b>${target_sl:,.2f}</b> (+15 pts)\n"
+                        f"Status   : <b>Bebas Risiko (Risk-Free Trade)!</b>\n"
+                        f"Target   : Menuju TP1 (+140 pts)"
                     )
                     self.telegram.send(msg)
 
@@ -624,28 +608,29 @@ class AureusSniperBot:
 
     def _evaluate_and_enter(self, current_tick: dict, candles_m1: list, candles_m5: list, candles_m15: list, acc_info: dict):
         """
-        Unified Multi-Timeframe Scoring Matrix (M1, M5, M15) - SSOT Engine
+        Unified Multi-Timeframe Scoring Matrix (M1, M5, M15) - SSOT Engine (Dua Arah Simetris)
+        Entry HANYA pada konfirmasi Closed Candle M5 (Rebound EMA 21).
         """
         if len(candles_m5) < 30:
             return
 
-        # 1. Closed Candle Selection (Gunakan Bar M5 yang selesai tertutup)
-        c_prev = candles_m5[-2]  # Bar M5 selesai (Closed Candle)
-        c_prev2 = candles_m5[-3] if len(candles_m5) >= 3 else c_prev
-        
-        closes_m5 = [c["close"] for c in candles_m5[:-1]] # Selesai
+        # 1. Closed Candle M5 (Gunakan lilin yang sudah selesai tertutup sempurna)
+        c_prev = candles_m5[-2]
+        candle_time = int(c_prev.get("time", 0))
+
+        closes_m5 = [c["close"] for c in candles_m5[:-1]]
         highs_m5 = [c["high"] for c in candles_m5[:-1]]
         lows_m5 = [c["low"] for c in candles_m5[:-1]]
 
-        # Proteksi Volatilitas (ATR M5 realistis)
+        # Proteksi Volatilitas
         ranges = [h - l for h, l in zip(highs_m5[-14:], lows_m5[-14:])]
         atr_m5 = sum(ranges) / len(ranges) if ranges else 90.0
         adx_m5 = self._calculate_adx(candles_m5[:-1], 14)
 
         is_wild = (atr_m5 > MAX_ATR_M5_THRESHOLD)
-        is_sideways = (adx_m5 < ADX_CHOP_THRESHOLD)
+        is_sideways = (adx_m5 < 18.0)
 
-        # 2. Rezim Tren Makro M15 & M5 (Bobot 35%)
+        # 2. Rezim Tren Makro M15 & M5 (Bobot 40%) - Simetris Dua Arah
         score = 0
         reasons = []
         st_m15 = self._calc_supertrend(candles_m15)
@@ -653,49 +638,55 @@ class AureusSniperBot:
         ema21_m5 = self._calc_ema(closes_m5, 21)
         ema50_m5 = self._calc_ema(closes_m5, 50) if len(closes_m5) >= 50 else ema21_m5
 
-        is_bull_regime = (st_m15 == "BULLISH" and (st_m5 == "BULLISH" or ema21_m5 > ema50_m5))
-        is_bear_regime = (st_m15 == "BEARISH" and (st_m5 == "BEARISH" or ema21_m5 < ema50_m5))
+        is_bull_regime = (st_m15 == "BULLISH" and (st_m5 == "BULLISH" or ema21_m5 >= ema50_m5))
+        is_bear_regime = (st_m15 == "BEARISH" and (st_m5 == "BEARISH" or ema21_m5 <= ema50_m5))
 
         if is_bull_regime:
-            score += 35
-            reasons.append("Rezim Tren Bullish (M15 & M5 Selaras)")
-        elif is_bear_regime:
-            score -= 35
-            reasons.append("Rezim Tren Bearish (M15 & M5 Selaras)")
-
-        # 3. Pullback Zone & Jaring Limit Order di EMA 21 (Bobot 40%)
-        # Pendekatan Limit Order: pasang jaring diskon tepat di lantai EMA 21 saat tren makro selaras
-        cur_price = current_tick.get("ask" if score >= 0 else "bid", c_prev["close"]) if current_tick else c_prev["close"]
-        dist_to_ema_buy = cur_price - ema21_m5
-        dist_to_ema_sell = ema21_m5 - cur_price
-
-        if is_bull_regime and (dist_to_ema_buy <= 1.5 * atr_m5):
             score += 40
-            reasons.append(f"Jaring Diskon: Target BUY LIMIT di EMA 21 (${ema21_m5:,.2f})")
-        elif is_bear_regime and (dist_to_ema_sell <= 1.5 * atr_m5):
+            reasons.append("Tren Makro M15 & M5 Bullish")
+        elif is_bear_regime:
             score -= 40
-            reasons.append(f"Jaring Diskon: Target SELL LIMIT di EMA 21 (${ema21_m5:,.2f})")
+            reasons.append("Tren Makro M15 & M5 Bearish")
 
-        # 4. Trigger Cepat M1 Momentum (Bobot 25%) - Memperkuat sinyal searah
+        # 3. Konfirmasi Rebound / Rejection Closed Candle di EMA 21 (Bobot 40%)
+        body_prev = abs(c_prev["close"] - c_prev["open"])
+        lower_wick = min(c_prev["open"], c_prev["close"]) - c_prev["low"]
+        upper_wick = c_prev["high"] - max(c_prev["open"], c_prev["close"])
+        has_activity = (c_prev["high"] - c_prev["low"]) >= 10.0
+
+        # BUY: Lilin sempat menguji EMA 21 dari atas, tutup di atas EMA 21 (Rejection sumbu bawah)
+        touched_ema_buy = c_prev["low"] <= (ema21_m5 + 0.35 * atr_m5)
+        rebound_buy = (
+            c_prev["close"] >= ema21_m5 and
+            (c_prev["close"] > c_prev["open"] or lower_wick >= 0.7 * body_prev) and
+            has_activity
+        )
+
+        # SELL: Lilin sempat menguji EMA 21 dari bawah, tutup di bawah EMA 21 (Rejection sumbu atas)
+        touched_ema_sell = c_prev["high"] >= (ema21_m5 - 0.35 * atr_m5)
+        rebound_sell = (
+            c_prev["close"] <= ema21_m5 and
+            (c_prev["close"] < c_prev["open"] or upper_wick >= 0.7 * body_prev) and
+            has_activity
+        )
+
+        if is_bull_regime and touched_ema_buy and rebound_buy:
+            score += 40
+            reasons.append("Konfirmasi Rebound: Lilin M5 Memantul di Lantai EMA 21")
+        elif is_bear_regime and touched_ema_sell and rebound_sell:
+            score -= 40
+            reasons.append("Konfirmasi Rejection: Lilin M5 Tertahan di Atap EMA 21")
+
+        # 4. Momentum M1 Cepat (Bobot 20%)
         if len(candles_m1) >= 15:
             closes_m1 = [c["close"] for c in candles_m1]
             ema9_m1 = self._calc_ema(closes_m1, 9)
             if closes_m1[-1] > ema9_m1 and score >= 0:
-                score += 25
+                score += 20
                 reasons.append("Momentum M1: Konfirmasi Bullish di atas EMA 9")
             elif closes_m1[-1] < ema9_m1 and score <= 0:
-                score -= 25
+                score -= 20
                 reasons.append("Momentum M1: Konfirmasi Bearish di bawah EMA 9")
-
-        # 5. Room to Run Filter (50 pts dari Swing M5)
-        sub20 = candles_m5[-21:-1]
-        recent_high_20 = max(c["high"] for c in sub20) if sub20 else c_prev["close"]
-        recent_low_20 = min(c["low"] for c in sub20) if sub20 else c_prev["close"]
-        cur_price = current_tick.get("ask" if score >= 0 else "bid", c_prev["close"])
-        
-        # Jika harga sudah breakout di luar swing 20 bar, ruang gerak terbuka bebas
-        room_to_high = max(0.0, recent_high_20 - cur_price) if cur_price < recent_high_20 else 999.0
-        room_to_low = max(0.0, cur_price - recent_low_20) if cur_price > recent_low_20 else 999.0
 
         # Bound score -100 to 100
         score = max(-100, min(100, score))
@@ -711,49 +702,26 @@ class AureusSniperBot:
         elif is_sideways:
             signal_type = "TUNGGU (PASAR SIDEWAYS)"
             direction = "WAIT"
-            reasons.insert(0, f"Pasar Sideways / Choppy (ADX M5 {adx_m5:.1f} < {ADX_CHOP_THRESHOLD:.0f}). Menahan peluru.")
+            reasons.insert(0, f"Pasar Sideways / Choppy (ADX M5 {adx_m5:.1f} < 18.0). Menahan peluru.")
         elif score >= CONFIDENCE_THRESHOLD:
             if not is_bull_regime:
                 direction = "WAIT"
                 signal_type = "TUNGGU (TREN M5 TURUN)"
-                reasons.insert(0, "⛔ Beli Ditolak Keras: Tren M5 sedang Turun (Menolak Membeli Pisau Jatuh).")
-            elif cur_price < recent_high_20 and room_to_high < MIN_ROOM_TO_RUN_POINTS:
-                signal_type = "TUNGGU (DEKAT RESISTENSI)"
-                direction = "WAIT"
-                reasons.insert(0, f"Beli Ditolak: Plafon Resisten M5 hanya +{room_to_high:.1f} pts (< {MIN_ROOM_TO_RUN_POINTS:.0f} pts).")
             else:
                 direction = "BUY"
-                signal_type = "JARING BUY LIMIT (EMA 21)"
+                signal_type = "SINYAL BUY (REBOUND EMA 21)"
         elif score <= -CONFIDENCE_THRESHOLD:
             if not is_bear_regime:
                 direction = "WAIT"
                 signal_type = "TUNGGU (TREN M5 NAIK)"
-                reasons.insert(0, "⛔ Jual Ditolak Keras: Tren M5 sedang Naik (Menolak Menjual di Tren Kuat).")
-            elif cur_price > recent_low_20 and room_to_low < MIN_ROOM_TO_RUN_POINTS:
-                signal_type = "TUNGGU (DEKAT SUPPORT)"
-                direction = "WAIT"
-                reasons.insert(0, f"Jual Ditolak: Lantai Support M5 hanya -{room_to_low:.1f} pts (< {MIN_ROOM_TO_RUN_POINTS:.0f} pts).")
             else:
                 direction = "SELL"
-                signal_type = "JARING SELL LIMIT (EMA 21)"
+                signal_type = "SINYAL SELL (REJECTION EMA 21)"
 
-        # Bersihkan pending limit order jika arah sinyal menjadi WAIT
-        if direction == "WAIT":
-            pending = self._get_pending_order()
-            if pending:
-                self._cancel_pending_order(pending, "Pasar tidak lagi konfluens")
-
-        # Cek status pending order aktif untuk SSOT
+        # Bersihkan pending limit order lama jika ada
         pending = self._get_pending_order()
-        pending_data = None
         if pending:
-            pending_data = {
-                "ticket": pending.ticket,
-                "type": "BUY_LIMIT" if pending.type == mt5.ORDER_TYPE_BUY_LIMIT else "SELL_LIMIT",
-                "price": pending.price_open,
-                "sl": pending.sl,
-                "tp": pending.tp,
-            }
+            self._cancel_pending_order(pending, "Pembersihan sistem pending order lama")
 
         # Update latest analysis for Web Dashboard (SSOT)
         self.latest_analysis = {
@@ -764,14 +732,12 @@ class AureusSniperBot:
             "signal": signal_type,
             "atr_m5": round(atr_m5, 2),
             "adx_m5": adx_m5,
-            "room_to_high": round(room_to_high, 1),
-            "room_to_low": round(room_to_low, 1),
             "reasons": reasons if reasons else ["Menunggu konfluensi setup valid"],
             "updated_at": int(time.time()),
             "is_paused": self.is_paused,
             "daily_pnl": round(self.daily_pnl_usd, 2),
             "circuit_breaker": self.circuit_breaker_active,
-            "pending_order": pending_data,
+            "pending_order": None,
         }
 
         # Check Active Cooldowns before MT5 Execution
@@ -796,15 +762,20 @@ class AureusSniperBot:
                 logger.info(f"Sinyal {direction} terdeteksi, tetapi dalam masa jeda cut loss (sisa {rem}s). Order ditahan.")
                 return
 
-            self._execute_order(direction, ema21_m5, cur_price, reasons, acc_info)
+            # Cek apakah sudah pernah entry di lilin tertutup yang sama
+            if self.last_entered_candle_time == candle_time:
+                return
 
-    def _execute_order(self, direction: str, ema21_m5: float, current_price: float, reasons: list, acc_info: dict):
+            cur_price = current_tick.get("ask" if direction == "BUY" else "bid", c_prev["close"]) if current_tick else c_prev["close"]
+            self._execute_order(direction, cur_price, reasons, acc_info, candle_time)
+
+    def _execute_order(self, direction: str, current_price: float, reasons: list, acc_info: dict, candle_time: int = 0):
         if not MT5_AVAILABLE:
             return
 
         is_buy = (direction == "BUY")
-        target_limit_price = round(ema21_m5, 2)
-        sl_dist = DEFAULT_SL_POINTS
+        order_type = mt5.ORDER_TYPE_BUY if is_buy else mt5.ORDER_TYPE_SELL
+        sl_dist = DEFAULT_SL_POINTS  # 85.0 points = -$0.85 USD
 
         sym_info = mt5.symbol_info(SYMBOL_TARGET)
         filling = mt5.ORDER_FILLING_IOC
@@ -816,115 +787,49 @@ class AureusSniperBot:
             else:
                 filling = mt5.ORDER_FILLING_RETURN
 
-        # 1. Periksa apakah sudah ada pending order milik bot
-        pending = self._get_pending_order()
-        if pending:
-            pending_is_buy = (pending.type == mt5.ORDER_TYPE_BUY_LIMIT)
-            if (is_buy and not pending_is_buy) or (not is_buy and pending_is_buy):
-                self._cancel_pending_order(pending, "Arah tren berbalik")
-                pending = None
-            else:
-                if abs(pending.price_open - target_limit_price) >= 15.0:
-                    new_sl = round(target_limit_price - sl_dist if is_buy else target_limit_price + sl_dist, 2)
-                    new_tp = round(target_limit_price + TARGET_TP1_POINTS if is_buy else target_limit_price - TARGET_TP1_POINTS, 2)
-                    req_mod = {
-                        "action": mt5.TRADE_ACTION_MODIFY,
-                        "order": pending.ticket,
-                        "price": float(target_limit_price),
-                        "sl": float(new_sl),
-                        "tp": float(new_tp),
-                    }
-                    res_mod = mt5.order_send(req_mod)
-                    if res_mod and res_mod.retcode == mt5.TRADE_RETCODE_DONE:
-                        logger.info(f"Pending order #{pending.ticket} di-adjust ke EMA 21 baru: ${target_limit_price:,.2f}")
-                return
+        entry_p = current_price
+        sl_price = round(entry_p - sl_dist if is_buy else entry_p + sl_dist, 2)
+        tp1_price = round(entry_p + TARGET_TP1_POINTS if is_buy else entry_p - TARGET_TP1_POINTS, 2)
 
-        # 2. Jika belum ada pending order, tentukan pasang PENDING LIMIT atau MARKET DEAL
-        need_market_deal = (is_buy and current_price <= target_limit_price) or (not is_buy and current_price >= target_limit_price)
+        req = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": SYMBOL_TARGET,
+            "volume": float(FIXED_LOT),
+            "type": order_type,
+            "price": float(entry_p),
+            "sl": float(sl_price),
+            "tp": float(tp1_price),
+            "deviation": 25,
+            "magic": MAGIC_NUMBER,
+            "comment": "Aureus M5 Rebound",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": filling,
+        }
+        res = mt5.order_send(req)
+        if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+            self.tracked_ticket = res.order
+            self.ladder_stage = 0
+            self.entry_price = float(getattr(res, "price", entry_p))
+            self.pos_type = direction
+            self.last_entered_candle_time = candle_time
 
-        if need_market_deal:
-            order_type = mt5.ORDER_TYPE_BUY if is_buy else mt5.ORDER_TYPE_SELL
-            entry_p = current_price
-            sl_price = round(entry_p - sl_dist if is_buy else entry_p + sl_dist, 2)
-            tp1_price = round(entry_p + TARGET_TP1_POINTS if is_buy else entry_p - TARGET_TP1_POINTS, 2)
-
-            req = {
-                "action": mt5.TRADE_ACTION_DEAL,
-                "symbol": SYMBOL_TARGET,
-                "volume": float(FIXED_LOT),
-                "type": order_type,
-                "price": float(entry_p),
-                "sl": float(sl_price),
-                "tp": float(tp1_price),
-                "deviation": 25,
-                "magic": MAGIC_NUMBER,
-                "comment": "Aureus Disc M5",
-                "type_time": mt5.ORDER_TIME_GTC,
-                "type_filling": filling,
-            }
-            res = mt5.order_send(req)
-            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                self.tracked_ticket = res.order
-                self.ladder_stage = 0
-                self.entry_price = float(getattr(res, "price", entry_p))
-                self.pos_type = direction
-
-                msg = (
-                    f"🔔 <b>[ORDER INSTAN — HARGA DISKON DI LANTAI EMA 21]</b>\n"
-                    f"────────────────────────\n"
-                    f"Aksi     : <b>{direction} {SYMBOL_TARGET}</b>\n"
-                    f"Volume   : <b>{FIXED_LOT} lot</b> (Fixed)\n"
-                    f"Harga    : ${self.entry_price:,.2f}\n"
-                    f"Batas SL : ${sl_price:,.2f} (-${sl_dist*0.01:.2f} USD)\n"
-                    f"Target TP: ${tp1_price:,.2f} (+${TARGET_TP1_POINTS*0.01:.2f} USD)\n"
-                    f"Alasan   : {' • '.join(reasons)}\n"
-                    f"Saldo    : ${acc_info.get('balance', 0.0):.2f} USD\n"
-                    f"────────────────────────\n"
-                    f"<i>Posisi dikawal 24/7 dengan Tangga Profit (+60, +100, +140 pts).</i>"
-                )
-                self.telegram.send(msg)
-                logger.info(f"Order instan {direction} sukses: Ticket #{res.order}")
-            else:
-                logger.warning(f"Order instan gagal: {getattr(res, 'retcode', 'None')} - {getattr(res, 'comment', '')}")
+            msg = (
+                f"🔔 <b>[ORDER BARU — KONFIRMASI REBOUND M5]</b>\n"
+                f"────────────────────────\n"
+                f"Aksi     : <b>{direction} {SYMBOL_TARGET}</b>\n"
+                f"Volume   : <b>{FIXED_LOT} lot</b> (Fixed)\n"
+                f"Harga    : ${self.entry_price:,.2f}\n"
+                f"Batas SL : ${sl_price:,.2f} (-${sl_dist*0.01:.2f} USD)\n"
+                f"Target TP: ${tp1_price:,.2f} (+${TARGET_TP1_POINTS*0.01:.2f} USD)\n"
+                f"Alasan   : {' • '.join(reasons[:2])}\n"
+                f"Saldo    : ${acc_info.get('balance', 0.0):.2f} USD\n"
+                f"────────────────────────\n"
+                f"<i>Posisi dikawal 24/7. BEP aktif di +80 pts, Target TP +140 pts.</i>"
+            )
+            self.telegram.send(msg)
+            logger.info(f"Order instan {direction} sukses: Ticket #{res.order} @ ${self.entry_price:,.2f}")
         else:
-            order_type = mt5.ORDER_TYPE_BUY_LIMIT if is_buy else mt5.ORDER_TYPE_SELL_LIMIT
-            sl_price = round(target_limit_price - sl_dist if is_buy else target_limit_price + sl_dist, 2)
-            tp1_price = round(target_limit_price + TARGET_TP1_POINTS if is_buy else target_limit_price - TARGET_TP1_POINTS, 2)
-
-            req = {
-                "action": mt5.TRADE_ACTION_PENDING,
-                "symbol": SYMBOL_TARGET,
-                "volume": float(FIXED_LOT),
-                "type": order_type,
-                "price": float(target_limit_price),
-                "sl": float(sl_price),
-                "tp": float(tp1_price),
-                "deviation": 25,
-                "magic": MAGIC_NUMBER,
-                "comment": "Aureus Limit EMA21",
-                "type_time": mt5.ORDER_TIME_GTC,
-                "type_filling": filling,
-            }
-            res = mt5.order_send(req)
-            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                msg = (
-                    f"🎯 <b>[JARING LIMIT ORDER TERPASANG DI EMA 21]</b>\n"
-                    f"────────────────────────\n"
-                    f"Tipe     : <b>{direction}_LIMIT {SYMBOL_TARGET}</b>\n"
-                    f"Volume   : <b>{FIXED_LOT} lot</b>\n"
-                    f"Jaring   : <b>${target_limit_price:,.2f}</b> (Lantai EMA 21 M5)\n"
-                    f"Harga Now: ${current_price:,.2f} (Jarak jemput: {abs(current_price - target_limit_price):.1f} pts)\n"
-                    f"Batas SL : ${sl_price:,.2f} (-${sl_dist*0.01:.2f} USD)\n"
-                    f"Target TP: ${tp1_price:,.2f} (+${TARGET_TP1_POINTS*0.01:.2f} USD)\n"
-                    f"Alasan   : {' • '.join(reasons)}\n"
-                    f"Saldo    : ${acc_info.get('balance', 0.0):.2f} USD\n"
-                    f"────────────────────────\n"
-                    f"<i>Order otomatis aktif saat harga retest mengetuk lantai EMA 21.</i>"
-                )
-                self.telegram.send(msg)
-                logger.info(f"Limit order {direction} sukses dipasang: Ticket #{res.order} @ {target_limit_price}")
-            else:
-                logger.warning(f"Gagal pasang limit order: {getattr(res, 'retcode', 'None')} - {getattr(res, 'comment', '')}")
+            logger.warning(f"Order instan {direction} gagal: {getattr(res, 'retcode', 'None')} - {getattr(res, 'comment', '')}")
 
     def _calc_rsi(self, series: list, period: int = 7) -> float:
         if len(series) < period + 1:
@@ -1142,25 +1047,18 @@ class AureusSniperBot:
             elif self.is_paused:
                 decision_badge = "⏸️ KEPUTUSAN: DIJEDA TELEGRAM"
                 action_text = "Analisa pasar tetap berjalan, tetapi eksekusi order MT5 dikunci. Ketik /start untuk mengaktifkan."
-            elif pending:
-                p_type = "BUY_LIMIT" if pending.type == mt5.ORDER_TYPE_BUY_LIMIT else "SELL_LIMIT"
-                tick = mt5.symbol_info_tick(SYMBOL_TARGET)
-                cp = tick.ask if pending.type == mt5.ORDER_TYPE_BUY_LIMIT else tick.bid if tick else pending.price_open
-                dist = abs(cp - pending.price_open)
-                decision_badge = f"🎯 JARING {p_type} AKTIF"
-                action_text = f"Pending {p_type} #{pending.ticket} terpasang di ${pending.price_open:,.2f} (Lantai EMA 21 M5). Menunggu lilin retest menjemput diskon (jarak jemput: {dist:.1f} pts)."
             elif direction == "BUY":
-                decision_badge = "🟢 KEPUTUSAN: SIAP PASANG BUY LIMIT"
-                action_text = f"Setup BUY terkonfirmasi (Keyakinan: {conf}%). Jaring limit order siap dipasang di EMA 21."
+                decision_badge = "🟢 KEPUTUSAN: SIAP BUY (REBOUND M5)"
+                action_text = f"Setup BUY terkonfirmasi (Keyakinan: {conf}%). Rebound lantai EMA 21 valid pada closed candle."
             elif direction == "SELL":
-                decision_badge = "🔴 KEPUTUSAN: SIAP PASANG SELL LIMIT"
-                action_text = f"Setup SELL terkonfirmasi (Keyakinan: {conf}%). Jaring limit order siap dipasang di EMA 21."
+                decision_badge = "🔴 KEPUTUSAN: SIAP SELL (REJECTION M5)"
+                action_text = f"Setup SELL terkonfirmasi (Keyakinan: {conf}%). Rejection atap EMA 21 valid pada closed candle."
             elif score > 0:
                 decision_badge = f"🟡 CONDONG BUY ({conf}% / {int(CONFIDENCE_THRESHOLD)}%)"
-                action_text = "Tren Makro NAIK, bot memantau jarak harga menuju lantai EMA 21."
+                action_text = "Tren Makro NAIK, menunggu lilin M5 ditutup memantul valid di EMA 21."
             elif score < 0:
                 decision_badge = f"🟡 CONDONG SELL ({conf}% / {int(CONFIDENCE_THRESHOLD)}%)"
-                action_text = "Tren Makro TURUN, bot memantau jarak harga menuju atap EMA 21."
+                action_text = "Tren Makro TURUN, menunggu lilin M5 ditutup tertahan valid di EMA 21."
             else:
                 decision_badge = "⚪ KEPUTUSAN: TUNGGU (PASAR NETRAL)"
                 action_text = "Pasar tidak memiliki arah tren yang jelas (Sideways/Konsolidasi)."

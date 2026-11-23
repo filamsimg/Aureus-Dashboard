@@ -94,16 +94,16 @@ export default function ScalpCard({ signal }: ScalpCardProps) {
             </div>
             <ul className="list-disc list-inside space-y-1.5 text-zinc-300 leading-relaxed text-xs">
               <li>
-                <strong className="text-zinc-100">Eksekusi Otomatis:</strong> Saat keyakinan mencapai <strong>&ge; 65%</strong> dan ruang gerak aman (&ge; 50 poin), bot membuka order 0.01 lot di Exness Real.
+                <strong className="text-zinc-100">Eksekusi Otomatis:</strong> Saat keyakinan mencapai <strong>&ge; 65%</strong>, bot mengeksekusi order 0.01 lot di Exness Real pada closed candle M5.
               </li>
               <li>
-                <strong className="text-zinc-100">Proteksi Anti-Pucuk & Anti-Lembah:</strong> Dilarang BUY dekat plafon resistensi dan dilarang SELL dekat lantai support.
+                <strong className="text-zinc-100">Sinyal Dua Arah Simetris:</strong> Mengikuti tren M15 & M5 (BUY saat memantul di lantai EMA 21, SELL saat tertahan di atap EMA 21).
               </li>
               <li>
-                <strong className="text-zinc-100">Proteksi Tangga Profit:</strong> Order dikawal bertingkat (+60 poin lock +$0.30, +100 poin lock +$0.60, +140 poin lock +$1.00 & lepas TP2).
+                <strong className="text-zinc-100">Proteksi Breakeven & TP Pasti:</strong> SL dikunci di 85 poin (-$0.85 USD). Breakeven aktif saat profit mencapai +80 poin, dan Target TP1 di +140 poin (+$1.40 USD).
               </li>
               <li>
-                <strong className="text-zinc-100">Kendali Terpusat:</strong> Sistem beroperasi mandiri di VPS Exness dengan proteksi akun terukur.
+                <strong className="text-zinc-100">Kendali Terpusat:</strong> Sistem beroperasi mandiri 24/7 di VPS Exness dengan proteksi modal terukur.
               </li>
             </ul>
           </div>
